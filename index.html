@@ -1357,7 +1357,7 @@ $("#recBtn").onclick=async ()=>{
 // [action] tag. 1.5B is measurably more reliable at both while still being
 // small enough to load in-browser; see HANDOFF.md for the actual test output.
 const CHAT_MODEL_ID = "Qwen2.5-1.5B-Instruct-q4f16_1-MLC";
-const chat = { engine:null, loading:false, history:[], recognizer:null, listening:false };
+const chat = { engine:null, enginePromise:null, progressListeners:[], loading:false, history:[], recognizer:null, listening:false };
 
 function chatSupported(){
   return typeof navigator!=="undefined" && !!navigator.gpu;
@@ -1398,13 +1398,22 @@ function extractActionTag(text){
   return { text: text.slice(0, m.index).trim(), action: m[1].toLowerCase() };
 }
 
-async function ensureChatEngine(onProgress){
-  if(chat.engine) return chat.engine;
-  const webllm = await import("https://esm.run/@mlc-ai/web-llm");
-  chat.engine = await webllm.CreateMLCEngine(CHAT_MODEL_ID, {
-    initProgressCallback: (p)=>{ onProgress && onProgress(p); },
-  });
-  return chat.engine;
+function ensureChatEngine(onProgress){
+  if(chat.engine) return Promise.resolve(chat.engine);
+  // Cache the in-flight promise, not just the resolved engine -- otherwise
+  // a preload kicked off on chatBtn click and a second call from
+  // sendChatMessage() (e.g. user hits Enter before loading finishes) would
+  // race and download the model twice.
+  if(chat.enginePromise) { if(onProgress) chat.progressListeners.push(onProgress); return chat.enginePromise; }
+  chat.progressListeners = [onProgress].filter(Boolean);
+  chat.enginePromise = (async ()=>{
+    const webllm = await import("https://esm.run/@mlc-ai/web-llm");
+    chat.engine = await webllm.CreateMLCEngine(CHAT_MODEL_ID, {
+      initProgressCallback: (p)=>{ chat.progressListeners.forEach(fn=>fn(p)); },
+    });
+    return chat.engine;
+  })();
+  return chat.enginePromise;
 }
 
 async function sendChatMessage(text){
@@ -1492,6 +1501,18 @@ $("#chatBtn").onclick=()=>{
   if($("#chatPanel").classList.contains("active")){
     if(!getSpeechRecognitionCtor()) $("#chatStatus").textContent = UI[LANG].chatNoMic;
     $("#chatText").focus();
+    // Start downloading the model the moment the panel opens (a clear signal
+    // of intent to chat) rather than waiting for the first Send -- by the
+    // time the user finishes typing, loading is already underway/done.
+    // Never triggered just from loading the page, so visitors who never open
+    // chat never pay for the download.
+    if(chatSupported() && !chat.engine && !chat.loading){
+      chat.loading = true;
+      ensureChatEngine(p=>{ $("#chatStatus").textContent = `${UI[LANG].chatLoading} ${Math.round((p.progress||0)*100)}%`; })
+        .then(()=>{ if($("#chatStatus").textContent.startsWith(UI[LANG].chatLoading)) $("#chatStatus").textContent=""; })
+        .catch(()=>{})
+        .finally(()=>{ chat.loading=false; });
+    }
   }
 };
 $("#chatCloseBtn").onclick=()=> $("#chatPanel").classList.remove("active");
