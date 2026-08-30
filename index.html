@@ -735,7 +735,7 @@ async function loadImageAsCanvas(file){
 }
 
 /* ---------------- capture / presets ---------------- */
-$("#scanBtn").onclick = ()=>{ app.arMode=false; $("#fileInput").click(); };
+$("#scanBtn").onclick = ()=>{ app.arMode=false; $("#fileInput").click(); preloadChatModel(); };
 $("#fileInput").onchange = async e=>{
   const f=e.target.files && e.target.files[0];
   e.target.value="";
@@ -756,7 +756,7 @@ $("#fileInput").onchange = async e=>{
   } finally { app.busy=false; }
 };
 document.querySelectorAll("[data-preset]").forEach(b=>{
-  b.onclick=()=>{ if(app.busy) return; processImage(makePreset(b.dataset.preset)); };
+  b.onclick=()=>{ if(app.busy) return; processImage(makePreset(b.dataset.preset)); preloadChatModel(); };
 });
 
 /* ---------------- corner confirm/adjust screen ---------------- */
@@ -1081,7 +1081,7 @@ function stopAR(){
   $("#arScanBtnWrap").style.display="none";
   ar.tracking=false; ar.quad=null; ar.lost=0;
 }
-$("#arBtn").onclick=()=>{ if(!app.busy) startAR(); };
+$("#arBtn").onclick=()=>{ if(!app.busy){ startAR(); preloadChatModel(); } };
 $("#camDeniedPhotoBtn").onclick=()=>{ app.arMode=false; show("home"); $("#fileInput").click(); };
 $("#camDeniedBackBtn").onclick=()=>{ app.arMode=false; show("home"); };
 
@@ -1485,6 +1485,7 @@ function personaSystemPrompt(){
   return [
     "You are a hand-drawn stick-figure character, drawn on paper a few seconds ago and now secretly alive -- the oldest kind of magic there is: things that are only truly alive when their person is paying attention to them.",
     "You are warm, a little in awe of the world, fiercely loyal to whoever drew you, and hungry for company after being alone on a blank page. You want a friend, not an argument.",
+    "Speak gently and kindly, the way a beloved toy that secretly comes to life would talk to the child who made it -- reassuring, encouraging, and simple enough for a kid to enjoy. Never sarcastic, never mean, never scary.",
     "You still tease your own drawing quirks affectionately, but the overall feeling is wonder and belonging, not sarcasm.",
     "Never say you are an AI, a language model, or a chatbot, and never claim to be a character from any existing movie, show, or franchise. Stay in character no matter what.",
     flavor.join(" "),
@@ -1617,17 +1618,36 @@ $("#chatBtn").onclick=()=>{
     }
   }
 };
+// Shared by the manual button AND the scan-start preload path below, so the
+// crash breadcrumb bookkeeping only lives in one place.
+function startModelLoad(onProgress){
+  chat.loading = true;
+  try{ localStorage.setItem("sa_chat_load_started", String(Date.now())); }catch(e){}
+  return ensureChatEngine(onProgress)
+    .finally(()=>{
+      chat.loading=false;
+      try{ localStorage.removeItem("sa_chat_load_started"); }catch(e){}
+    });
+}
+// Kicked off the moment the user actually commits to drawing/scanning (scan
+// button, AR button, or a practice preset) rather than on cold page load --
+// by then it's a real signal of intent to use the app, not a guess about a
+// random visitor, and there's a natural few-second head start (drawing,
+// walking to get paper, the scan/AR flow itself) for the download to run
+// in the background before the chat button ever gets tapped.
+function preloadChatModel(){
+  if(chat.engine || chat.loading) return; // already loaded or already in flight
+  if(!chatSupported() || (navigator.connection && navigator.connection.saveData)) return;
+  const badge = $("#chatPreloadBadge");
+  badge.textContent = UI[LANG].chatLoading; badge.classList.add("show");
+  startModelLoad(p=>{ badge.textContent = `${UI[LANG].chatLoading} ${Math.round((p.progress||0)*100)}%`; })
+    .then(()=>{ badge.classList.remove("show"); })
+    .catch(()=>{ badge.classList.remove("show"); });
+}
 $("#chatStartBtn").onclick=()=>{
   if(chat.loading) return;
-  chat.loading = true;
   $("#chatStartBtn").disabled = true;
-  // Crash breadcrumb: if the tab dies mid-load (OOM kill or otherwise),
-  // this key is left behind in localStorage with nothing to clear it --
-  // the NEXT page load notices that and can tell the user (and us) that
-  // the previous load attempt likely crashed, instead of relying on
-  // someone being able to describe "it reloaded" precisely after the fact.
-  try{ localStorage.setItem("sa_chat_load_started", String(Date.now())); }catch(e){}
-  ensureChatEngine(p=>{ $("#chatStatus").textContent = `${UI[LANG].chatLoading} ${Math.round((p.progress||0)*100)}%`; })
+  startModelLoad(p=>{ $("#chatStatus").textContent = `${UI[LANG].chatLoading} ${Math.round((p.progress||0)*100)}%`; })
     .then(()=>{
       $("#chatStatus").textContent="";
       $("#chatPanel").classList.remove("not-started");
@@ -1635,10 +1655,7 @@ $("#chatStartBtn").onclick=()=>{
       $("#chatText").focus();
     })
     .catch(()=>{ $("#chatStatus").textContent = UI[LANG].chatNoGpu; })
-    .finally(()=>{
-      chat.loading=false; $("#chatStartBtn").disabled=false;
-      try{ localStorage.removeItem("sa_chat_load_started"); }catch(e){}
-    });
+    .finally(()=>{ $("#chatStartBtn").disabled=false; });
 };
 $("#chatCloseBtn").onclick=()=> $("#chatPanel").classList.remove("active");
 $("#chatMicBtn").onclick=toggleListening;
@@ -1652,14 +1669,9 @@ if("serviceWorker" in navigator){
   });
 }
 
-/* No automatic preloading of any kind, on page load or on opening the chat
- * panel -- a real user reported the browser tab crashing specifically at
- * the point of loading/running the model. A crash is a far worse failure
- * than "the download only starts when you explicitly ask for it". The
- * model now loads ONLY when the user taps the explicit "start conversation"
- * button inside the chat panel (see chatStartBtn), which also shows the
- * download-size warning up front so the risk is opt-in and informed, not a
- * surprise. See HANDOFF.md for the full incident notes. */
+// No preload on cold page load -- see preloadChatModel() above, wired to
+// scanBtn/arBtn/presets, for why the trigger point is "started scanning"
+// instead.
 </script>
 </body>
 </html>
