@@ -108,6 +108,13 @@
   #fileInput{display:none}
   a.credit{position:fixed;bottom:8px;right:12px;font-size:11px;color:var(--pencil);
     text-decoration:none;z-index:2}
+  /* Global (not tied to any one .screen) so progress is visible while
+     drawing/scanning too, not just after opening the chat panel. */
+  #chatPreloadBadge{display:none;position:fixed;left:8px;
+    bottom:calc(env(safe-area-inset-bottom,0px) + 8px);z-index:60;
+    background:rgba(38,38,46,.85);color:#fff;font-size:11px;padding:5px 10px;
+    border-radius:12px;pointer-events:none}
+  #chatPreloadBadge.show{display:block}
 
   /* ---- corner-confirm screen ---- */
   #corners{padding:16px}
@@ -275,6 +282,7 @@
 <input type="file" id="fileInput" accept="image/*" capture="environment">
 <canvas id="hiddenCanvas" style="display:none"></canvas>
 <a class="credit" href="#" onclick="return false">#SketchAlive</a>
+<div id="chatPreloadBadge"></div>
 
 <script src="core.js"></script>
 <script>
@@ -1552,9 +1560,18 @@ if("serviceWorker" in navigator){
  * opened") -- the download is the slow part, and starting it the moment the
  * page is WebGPU-capable means it's often ready by the time someone actually
  * wants to talk. Skipped entirely if the browser says the user has Data
- * Saver on, since this is a real, un-asked-for download otherwise. */
+ * Saver on, since this is a real, un-asked-for download otherwise.
+ *
+ * A small persistent badge (visible across every screen, not just inside
+ * the chat panel) shows this progress while you're drawing/scanning, so
+ * "is it ready yet" has a visible answer instead of just hoping. */
 if(chatSupported() && !(navigator.connection && navigator.connection.saveData)){
-  ensureChatEngine().catch(()=>{}); // silent -- errors surface properly when the user actually opens chat
+  const badge = $("#chatPreloadBadge");
+  badge.textContent = "🧠 " + UI[LANG].chatLoading; badge.classList.add("show");
+  ensureChatEngine(p=>{
+    const pct = Math.round((p.progress||0)*100);
+    badge.textContent = `🧠 ${UI[LANG].chatLoading} ${pct}%`;
+  }).then(()=>{ badge.classList.remove("show"); }).catch(()=>{ badge.classList.remove("show"); });
 }
 </script>
 </body>
