@@ -172,6 +172,11 @@
   #chatNoGpuBanner p{margin:0}
   #chatPanel.no-gpu #chatLog,#chatPanel.no-gpu #chatRow{display:none}
   #chatPanel.no-gpu #chatNoGpuBanner{display:block}
+  #chatStartWrap{display:none;text-align:center;padding:4px 2px}
+  #chatStartWrap p{font-size:12px;color:var(--pencil);margin-bottom:8px;line-height:1.5}
+  #chatStartWrap button{width:100%;margin:0}
+  #chatPanel.not-started #chatLog,#chatPanel.not-started #chatRow{display:none}
+  #chatPanel.not-started #chatStartWrap{display:block}
   #chatLog{overflow-y:auto;max-height:26vh;font-size:14px;line-height:1.5;padding:2px 4px}
   #chatLog .msg{margin:4px 0}
   #chatLog .msg.user{color:var(--ink);text-align:right}
@@ -265,6 +270,10 @@
       <strong data-i18n="chatNoGpuTitle">会話機能は使えません</strong>
       <p data-i18n="chatNoGpuDetail">この端末・ブラウザはWebGPUに対応していません。</p>
     </div>
+    <div id="chatStartWrap">
+      <p data-i18n="chatStartDetail">会話機能を使うには、初回だけモデル（数百MB〜1GB）をダウンロードします。端末によっては読み込み中に不安定になる場合があります。</p>
+      <button class="primary" id="chatStartBtn" data-i18n="chatStartBtn">ダウンロードして会話を始める</button>
+    </div>
     <div id="chatLog"></div>
     <div id="chatStatus"></div>
     <div id="chatRow">
@@ -334,7 +343,9 @@ const UI = {
        chatNoGpu:"この端末/ブラウザは会話機能に対応していません（WebGPUが必要）。",
        chatNoMic:"この端末では音声入力に対応していません。テキストで話しかけてください。",
        chatListening:"聞いています…", chatThinking:"考え中…", chatBtnLabel:"会話する",
-       chatNoGpuTitle:"会話機能は使えません", chatNoGpuDetail:"この端末・ブラウザはWebGPUに対応していません。新しめのAndroid ChromeまたはPCのChrome/Edgeで試してください。" },
+       chatNoGpuTitle:"会話機能は使えません", chatNoGpuDetail:"この端末・ブラウザはWebGPUに対応していません。新しめのAndroid ChromeまたはPCのChrome/Edgeで試してください。",
+       chatStartDetail:"会話機能を使うには、初回だけモデル（数百MB〜1GB）をダウンロードします。端末によっては読み込み中に不安定になる場合があります。",
+       chatStartBtn:"ダウンロードして会話を始める" },
   en:{ drawPrompt:"Draw something with arms and legs.", scan:"Scan my doodle",
        noCam:"No camera? Try a practice doodle:", again:"New doodle",
        hint:"Tap to talk · drag to carry · double-tap to dance",
@@ -350,7 +361,10 @@ const UI = {
        chatLoading:"Loading the chat model... (first time only, tens of MB+)",
        chatNoGpu:"Chat isn't supported on this device/browser (needs WebGPU).",
        chatNoMic:"Voice input isn't supported here. Type instead.",
-       chatListening:"Listening...", chatThinking:"Thinking...", chatBtnLabel:"Talk" },
+       chatListening:"Listening...", chatThinking:"Thinking...", chatBtnLabel:"Talk",
+       chatNoGpuTitle:"Chat isn't available", chatNoGpuDetail:"This device/browser doesn't support WebGPU. Try a recent Chrome/Edge on desktop or Android.",
+       chatStartDetail:"Chat needs a one-time model download (hundreds of MB to ~1GB). On some devices this can make the browser unstable while loading.",
+       chatStartBtn:"Download & start chatting" },
 };
 const LINES = {
   ja:{
@@ -1406,11 +1420,17 @@ $("#recBtn").onclick=async ()=>{
    testable. Needs a real WebGPU-capable browser to confirm the model
    actually loads and answers sensibly -- see HANDOFF.md.
    ===================================================================== */
-// Qwen2.5-0.5B was tested and rejected: it ignored the "reply in Japanese"
-// instruction and answered in Chinese, and never reliably produced a valid
-// [action] tag. 1.5B is measurably more reliable at both while still being
-// small enough to load in-browser; see HANDOFF.md for the actual test output.
-const CHAT_MODEL_ID = "Qwen2.5-1.5B-Instruct-q4f16_1-MLC";
+// Model size history (see HANDOFF.md for the full incident notes):
+//  - 0.5B: ignored the "reply in Japanese" instruction (answered in
+//    Chinese), rarely produced a valid [action] tag.
+//  - 1.5B: fixed both of the above in testing here, BUT a real user's
+//    browser tab crashed specifically while loading/running it -- almost
+//    certainly an out-of-memory kill (GB-scale weights + WebGPU buffers),
+//    which no amount of try/catch can prevent from this side. A crash is a
+//    strictly worse outcome than occasional wrong-language replies, so
+//    back down to 0.5B until there's a safer way to size-detect the
+//    device, or a way to offer a model-size choice in the UI.
+const CHAT_MODEL_ID = "Qwen2.5-0.5B-Instruct-q4f16_1-MLC";
 const chat = { engine:null, enginePromise:null, progressListeners:[], loading:false, history:[], recognizer:null, listening:false };
 
 function chatSupported(){
@@ -1479,10 +1499,14 @@ async function sendChatMessage(text){
     $("#chatStatus").textContent = T.chatNoGpu;
     return;
   }
-  $("#chatStatus").textContent = chat.engine ? T.chatThinking : T.chatLoading;
+  if(!chat.engine){
+    // The model must only ever start loading from an explicit chatStartBtn
+    // tap (see above) -- never implicitly from here, even as a fallback.
+    $("#chatPanel").classList.add("not-started");
+    return;
+  }
+  $("#chatStatus").textContent = T.chatThinking;
   try{
-    await ensureChatEngine(p=>{ $("#chatStatus").textContent = `${T.chatLoading} ${Math.round((p.progress||0)*100)}%`; });
-    $("#chatStatus").textContent = T.chatThinking;
     chat.history.push({role:"user", content:text});
     if(chat.history.length>8) chat.history = chat.history.slice(-8); // keep context (and latency) small
     const messages = [{role:"system", content:personaSystemPrompt()}, ...chat.history];
@@ -1550,27 +1574,35 @@ function toggleListening(){
   try{ rec.start(); }catch(e){ /* already running */ }
 }
 
+// The model download/load is the ONLY thing that ever crashed a real
+// device -- so it must never start silently. chatBtn only opens the panel
+// and shows either the no-GPU banner, the explicit "start" gate, or (once
+// chatStartBtn has actually been tapped at least once) the normal chat UI.
 $("#chatBtn").onclick=()=>{
   $("#chatPanel").classList.toggle("active");
   if($("#chatPanel").classList.contains("active")){
-    // Surface "this device can't do it" immediately and unmistakably,
-    // instead of a small status line that's easy to open the panel, get
-    // silence, and assume nothing happened.
     $("#chatPanel").classList.toggle("no-gpu", !chatSupported());
     if(!chatSupported()) return;
-    if(!getSpeechRecognitionCtor()) $("#chatStatus").textContent = UI[LANG].chatNoMic;
-    $("#chatText").focus();
-    // Page-load already tried to preload the model (see below); this is
-    // just a safety net for when that was skipped (Data Saver) or hadn't
-    // finished detecting WebGPU support yet.
-    if(!chat.engine && !chat.loading){
-      chat.loading = true;
-      ensureChatEngine(p=>{ $("#chatStatus").textContent = `${UI[LANG].chatLoading} ${Math.round((p.progress||0)*100)}%`; })
-        .then(()=>{ if($("#chatStatus").textContent.startsWith(UI[LANG].chatLoading)) $("#chatStatus").textContent=""; })
-        .catch(()=>{})
-        .finally(()=>{ chat.loading=false; });
+    $("#chatPanel").classList.toggle("not-started", !chat.engine);
+    if(chat.engine){
+      if(!getSpeechRecognitionCtor()) $("#chatStatus").textContent = UI[LANG].chatNoMic;
+      $("#chatText").focus();
     }
   }
+};
+$("#chatStartBtn").onclick=()=>{
+  if(chat.loading) return;
+  chat.loading = true;
+  $("#chatStartBtn").disabled = true;
+  ensureChatEngine(p=>{ $("#chatStatus").textContent = `${UI[LANG].chatLoading} ${Math.round((p.progress||0)*100)}%`; })
+    .then(()=>{
+      $("#chatStatus").textContent="";
+      $("#chatPanel").classList.remove("not-started");
+      if(!getSpeechRecognitionCtor()) $("#chatStatus").textContent = UI[LANG].chatNoMic;
+      $("#chatText").focus();
+    })
+    .catch(()=>{ $("#chatStatus").textContent = UI[LANG].chatNoGpu; })
+    .finally(()=>{ chat.loading=false; $("#chatStartBtn").disabled=false; });
 };
 $("#chatCloseBtn").onclick=()=> $("#chatPanel").classList.remove("active");
 $("#chatMicBtn").onclick=toggleListening;
@@ -1584,36 +1616,14 @@ if("serviceWorker" in navigator){
   });
 }
 
-/* Preload the chat model as early as possible (page load, not "chat panel
- * opened") -- the download is the slow part, and starting it the moment the
- * page is WebGPU-capable means it's often ready by the time someone actually
- * wants to talk.
- *
- * SAFETY: a ~1.5B-param model plus WebGPU buffers is a real, GB-scale
- * memory commitment. Auto-downloading it in the background on a phone
- * with limited RAM risks the browser tab crashing outright -- not a JS
- * error catchable by try/catch, an actual OOM kill. Only auto-preload when
- * navigator.deviceMemory positively reports enough headroom (>=4GB); most
- * mobile Safari has no such API at all, so this conservatively does NOT
- * auto-preload there, or on any device that reports less. Those cases fall
- * back to loading on-demand when the chat panel is actually opened (see
- * chatBtn's onclick), which at least ties the download to explicit intent
- * instead of happening silently for everyone regardless of device.
- *
- * A small persistent badge (visible across every screen, not just inside
- * the chat panel) shows preload progress while you're drawing/scanning, so
- * "is it ready yet" has a visible answer instead of just hoping. */
-const safeToAutoPreload = chatSupported()
-  && !(navigator.connection && navigator.connection.saveData)
-  && (navigator.deviceMemory === undefined ? false : navigator.deviceMemory >= 4);
-if(safeToAutoPreload){
-  const badge = $("#chatPreloadBadge");
-  badge.textContent = UI[LANG].chatLoading; badge.classList.add("show");
-  ensureChatEngine(p=>{
-    const pct = Math.round((p.progress||0)*100);
-    badge.textContent = `${UI[LANG].chatLoading} ${pct}%`;
-  }).then(()=>{ badge.classList.remove("show"); }).catch(()=>{ badge.classList.remove("show"); });
-}
+/* No automatic preloading of any kind, on page load or on opening the chat
+ * panel -- a real user reported the browser tab crashing specifically at
+ * the point of loading/running the model. A crash is a far worse failure
+ * than "the download only starts when you explicitly ask for it". The
+ * model now loads ONLY when the user taps the explicit "start conversation"
+ * button inside the chat panel (see chatStartBtn), which also shows the
+ * download-size warning up front so the risk is opt-in and informed, not a
+ * surprise. See HANDOFF.md for the full incident notes. */
 </script>
 </body>
 </html>
