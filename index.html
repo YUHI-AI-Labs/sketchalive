@@ -86,9 +86,11 @@
   /* live scene */
   #live{padding:0}
   #stage{position:absolute;inset:0;touch-action:none}
-  #hud{position:absolute;top:calc(env(safe-area-inset-top,0px) + 10px);right:10px;left:auto;
-    display:flex;gap:6px;z-index:5}
+  #hud{position:fixed;top:calc(env(safe-area-inset-top,0px) + 10px);right:10px;left:auto;
+    display:flex;gap:6px;z-index:50}
   #hud button{font-size:13px;padding:8px 13px;margin:0;background:rgba(252,252,248,.92)}
+  #hud button#chatBtn{background:var(--redpen);color:#fff;border-color:var(--redpen);
+    font-weight:bold;box-shadow:0 2px 6px rgba(0,0,0,.35)}
   #bubble{
     position:absolute;max-width:240px;padding:10px 14px;background:#fff;
     border:2.5px solid var(--ink);
@@ -148,6 +150,12 @@
     background:rgba(252,252,248,.97);border:2.5px solid var(--ink);border-radius:16px;
     padding:10px;max-height:46vh;box-shadow:2px 4px 0 rgba(38,38,46,.2)}
   #chatPanel.active{display:flex;flex-direction:column;gap:6px}
+  #chatNoGpuBanner{display:none;background:#fef3e0;border:1.5px solid #c98a1f;border-radius:8px;
+    padding:8px 10px;margin-bottom:6px;font-size:13px;color:#5c3a08}
+  #chatNoGpuBanner strong{display:block;margin-bottom:2px}
+  #chatNoGpuBanner p{margin:0}
+  #chatPanel.no-gpu #chatLog,#chatPanel.no-gpu #chatRow{display:none}
+  #chatPanel.no-gpu #chatNoGpuBanner{display:block}
   #chatLog{overflow-y:auto;max-height:26vh;font-size:14px;line-height:1.5;padding:2px 4px}
   #chatLog .msg{margin:4px 0}
   #chatLog .msg.user{color:var(--ink);text-align:right}
@@ -232,11 +240,15 @@
   <div id="arHint"><span id="arHintText"></span></div>
   <div id="bubble"></div>
   <div id="hud">
-    <button id="chatBtn" title="Talk">💬</button>
+    <button id="chatBtn" title="Talk" data-i18n="chatBtnLabel">💬 会話</button>
     <button id="recBtn">● 10s</button>
     <button id="againBtn" data-i18n="again">新しい落書き</button>
   </div>
   <div id="chatPanel">
+    <div id="chatNoGpuBanner">
+      <strong data-i18n="chatNoGpuTitle">会話機能は使えません</strong>
+      <p data-i18n="chatNoGpuDetail">この端末・ブラウザはWebGPUに対応していません。</p>
+    </div>
     <div id="chatLog"></div>
     <div id="chatStatus"></div>
     <div id="chatRow">
@@ -278,7 +290,8 @@ const screens = { home: $("#home"), loading: $("#loading"), corners: $("#corners
 function show(name){ Object.values(screens).forEach(s=>s.classList.remove("active")); screens[name].classList.add("active"); }
 
 /* ---------------- i18n + voice lines ---------------- */
-let LANG = (navigator.language||"en").startsWith("ja") ? "ja" : "en";
+// Japanese-first by default regardless of browser locale; EN/JA toggle stays available.
+let LANG = (navigator.language||"").startsWith("en") && !(navigator.language||"").startsWith("ja") ? "en" : "ja";
 const UI = {
   ja:{ drawPrompt:"手と足のあるやつを、紙に描いて。", scan:"落書きをスキャン",
        noCam:"カメラが使えない？ 練習台で試す：", again:"新しい落書き",
@@ -295,7 +308,8 @@ const UI = {
        chatLoading:"会話モデルを読み込み中…（初回のみ、数十MB〜）",
        chatNoGpu:"この端末/ブラウザは会話機能に対応していません（WebGPUが必要）。",
        chatNoMic:"この端末では音声入力に対応していません。テキストで話しかけてください。",
-       chatListening:"聞いています…", chatThinking:"考え中…" },
+       chatListening:"聞いています…", chatThinking:"考え中…", chatBtnLabel:"💬 会話",
+       chatNoGpuTitle:"会話機能は使えません", chatNoGpuDetail:"この端末・ブラウザはWebGPUに対応していません。新しめのAndroid ChromeまたはPCのChrome/Edgeで試してください。" },
   en:{ drawPrompt:"Draw something with arms and legs.", scan:"Scan my doodle",
        noCam:"No camera? Try a practice doodle:", again:"New doodle",
        hint:"Tap to talk · drag to carry · double-tap to dance",
@@ -1503,14 +1517,17 @@ function toggleListening(){
 $("#chatBtn").onclick=()=>{
   $("#chatPanel").classList.toggle("active");
   if($("#chatPanel").classList.contains("active")){
+    // Surface "this device can't do it" immediately and unmistakably,
+    // instead of a small status line that's easy to open the panel, get
+    // silence, and assume nothing happened.
+    $("#chatPanel").classList.toggle("no-gpu", !chatSupported());
+    if(!chatSupported()) return;
     if(!getSpeechRecognitionCtor()) $("#chatStatus").textContent = UI[LANG].chatNoMic;
     $("#chatText").focus();
-    // Start downloading the model the moment the panel opens (a clear signal
-    // of intent to chat) rather than waiting for the first Send -- by the
-    // time the user finishes typing, loading is already underway/done.
-    // Never triggered just from loading the page, so visitors who never open
-    // chat never pay for the download.
-    if(chatSupported() && !chat.engine && !chat.loading){
+    // Page-load already tried to preload the model (see below); this is
+    // just a safety net for when that was skipped (Data Saver) or hadn't
+    // finished detecting WebGPU support yet.
+    if(!chat.engine && !chat.loading){
       chat.loading = true;
       ensureChatEngine(p=>{ $("#chatStatus").textContent = `${UI[LANG].chatLoading} ${Math.round((p.progress||0)*100)}%`; })
         .then(()=>{ if($("#chatStatus").textContent.startsWith(UI[LANG].chatLoading)) $("#chatStatus").textContent=""; })
@@ -1529,6 +1546,15 @@ if("serviceWorker" in navigator){
   addEventListener("load", () => {
     navigator.serviceWorker.register("sw.js").catch(() => {}); // best-effort; app works fine without it
   });
+}
+
+/* Preload the chat model as early as possible (page load, not "chat panel
+ * opened") -- the download is the slow part, and starting it the moment the
+ * page is WebGPU-capable means it's often ready by the time someone actually
+ * wants to talk. Skipped entirely if the browser says the user has Data
+ * Saver on, since this is a real, un-asked-for download otherwise. */
+if(chatSupported() && !(navigator.connection && navigator.connection.saveData)){
+  ensureChatEngine().catch(()=>{}); // silent -- errors surface properly when the user actually opens chat
 }
 </script>
 </body>
