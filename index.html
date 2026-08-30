@@ -1,0 +1,1510 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>SketchAlive — Draw it. Scan it. Watch it escape.</title>
+<meta name="description" content="Draw a stick figure on paper, scan it, and watch it escape the page.">
+<meta name="theme-color" content="#FCFCF8">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icons/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="SketchAlive">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Yusei+Magic&display=swap" rel="stylesheet">
+<style>
+  /* ---- notebook design tokens ---- */
+  :root{
+    --paper:#FCFCF8;
+    --grid:#D3E3EE;
+    --ink:#26262E;
+    --redpen:#E8442E;
+    --pencil:#8A8A94;
+    --desk:#9C7B5C;
+    --desk-dark:#82644A;
+  }
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{height:100%;overflow:hidden;overscroll-behavior:none}
+  body{
+    font-family:'Yusei Magic', 'Hiragino Maru Gothic ProN', system-ui, sans-serif;
+    color:var(--ink);
+    background:
+      linear-gradient(var(--grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid) 1px, transparent 1px),
+      var(--paper);
+    background-size:28px 28px, 28px 28px, auto;
+    user-select:none;-webkit-user-select:none;
+  }
+  /* red margin line — the notebook signature */
+  body::before{
+    content:"";position:fixed;top:0;bottom:0;left:34px;width:2px;
+    background:var(--redpen);opacity:.45;pointer-events:none;z-index:1;
+  }
+  .screen{position:fixed;inset:0;display:none;flex-direction:column;
+    align-items:center;justify-content:center;text-align:center;padding:32px;z-index:2}
+  .screen.active{display:flex}
+
+  h1{font-size:clamp(34px,9vw,56px);line-height:1.15;letter-spacing:.01em}
+  .tagline{margin-top:10px;font-size:clamp(15px,4vw,19px);color:var(--pencil)}
+  .prompt{font-size:clamp(20px,5.5vw,28px);margin-bottom:26px;line-height:1.5}
+  .small{font-size:14px;color:var(--pencil);margin-top:14px}
+
+  /* hand-drawn wobbly buttons */
+  button{
+    font:inherit;font-size:clamp(17px,4.5vw,21px);color:var(--ink);
+    background:var(--paper);border:2.5px solid var(--ink);
+    border-radius:255px 15px 225px 15px/15px 225px 15px 255px;
+    padding:14px 26px;margin:8px;cursor:pointer;
+    box-shadow:2px 3px 0 rgba(38,38,46,.25);
+    transition:transform .08s;
+  }
+  button:active{transform:translate(1px,2px);box-shadow:none}
+  button.primary{background:var(--redpen);color:#fff;border-color:var(--redpen)}
+  button.ghost{border-style:dashed;color:var(--pencil);border-color:var(--pencil);box-shadow:none}
+  .presets{display:flex;flex-wrap:wrap;justify-content:center;margin-top:8px}
+  .presets button{font-size:15px;padding:10px 16px}
+
+  #arrow{font-size:34px;margin:6px 0;animation:bounceDown 1.4s infinite}
+  @keyframes bounceDown{0%,100%{transform:translateY(0)}50%{transform:translateY(8px)}}
+
+  /* loading */
+  #loadingMsg{font-size:clamp(19px,5vw,26px);min-height:3em;line-height:1.5}
+  #scribbleLoader{width:120px;height:60px;margin-bottom:20px}
+  #scribbleLoader path{fill:none;stroke:var(--ink);stroke-width:3;stroke-linecap:round;
+    stroke-dasharray:300;stroke-dashoffset:300;animation:scrib 1.6s linear infinite}
+  @keyframes scrib{to{stroke-dashoffset:-300}}
+
+  /* found screen */
+  #foundLine{font-size:clamp(24px,7vw,36px);margin-bottom:8px;line-height:1.4}
+  #foundSub{color:var(--pencil);margin-bottom:24px;font-size:clamp(15px,4vw,18px)}
+  #foundPreview{max-width:min(60vw,240px);max-height:32vh;margin-bottom:18px;
+    filter:drop-shadow(2px 4px 4px rgba(0,0,0,.2))}
+
+  /* live scene */
+  #live{padding:0}
+  #stage{position:absolute;inset:0;touch-action:none}
+  #hud{position:absolute;top:calc(env(safe-area-inset-top,0px) + 10px);right:10px;left:auto;
+    display:flex;gap:6px;z-index:5}
+  #hud button{font-size:13px;padding:8px 13px;margin:0;background:rgba(252,252,248,.92)}
+  #bubble{
+    position:absolute;max-width:240px;padding:10px 14px;background:#fff;
+    border:2.5px solid var(--ink);
+    border-radius:225px 15px 255px 15px/15px 255px 15px 225px;
+    font-size:16px;line-height:1.45;transform:translate(-50%,-100%);
+    display:none;z-index:4;pointer-events:none;
+  }
+  #bubble::after{content:"";position:absolute;left:50%;bottom:-12px;width:2.5px;height:12px;
+    background:var(--ink);transform:rotate(18deg)}
+  #freeBtnWrap{position:absolute;left:0;right:0;bottom:calc(env(safe-area-inset-bottom,0px) + 26px);
+    text-align:center;z-index:5}
+  #hint{position:absolute;left:0;right:0;bottom:calc(env(safe-area-inset-bottom,0px) + 8px);
+    text-align:center;font-size:13px;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.4);
+    z-index:5;pointer-events:none;opacity:0;transition:opacity .6s}
+  #fileInput{display:none}
+  a.credit{position:fixed;bottom:8px;right:12px;font-size:11px;color:var(--pencil);
+    text-decoration:none;z-index:2}
+
+  /* ---- corner-confirm screen ---- */
+  #corners{padding:16px}
+  /* #cornerWrap sizes to its canvas child; the canvas itself is capped on
+     BOTH axes (max-width and max-height) with width/height left auto, so a
+     tall capture (e.g. a 390x844 phone-viewport AR scan) shrinks to fit
+     instead of overflowing over the buttons below it. */
+  #cornerWrap{position:relative;display:inline-block;touch-action:none}
+  #cornerCanvas{display:block;max-width:min(92vw,420px);max-height:56vh;width:auto;height:auto;
+    border:2px solid var(--ink);border-radius:6px}
+  .handle{position:absolute;width:30px;height:30px;margin:-15px 0 0 -15px;border-radius:50%;
+    background:rgba(232,68,46,.85);border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4);touch-action:none}
+  #cornerRow{margin-top:16px;display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
+
+  /* ---- debug overlay (FOUND screen) ---- */
+  #debugPanel{display:none;margin-top:12px;max-width:min(92vw,420px);text-align:left;
+    background:#fff;border:2px dashed var(--pencil);border-radius:10px;padding:10px;font-size:12px}
+  #debugPanel.active{display:block}
+  #debugPanel h4{margin:6px 0 4px;font-size:12px;color:var(--pencil)}
+  #debugTabs{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:6px}
+  #debugTabs button{font-size:11px;padding:4px 9px;margin:0}
+  #debugCanvasWrap{position:relative;max-width:100%}
+  #debugCanvas{width:100%;height:auto;background:#eee;border-radius:4px}
+  #debugStats{white-space:pre-wrap;font-family:ui-monospace,monospace;font-size:11px;margin-top:6px;color:var(--ink)}
+
+  /* ---- AR / live-camera mode ---- */
+  #camVideo{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:none}
+  #arHint{position:absolute;left:0;right:0;top:calc(env(safe-area-inset-top,0px)+52px);
+    text-align:center;z-index:5;pointer-events:none;opacity:0;transition:opacity .3s}
+  #arHint span{background:rgba(38,38,46,.82);color:#fff;padding:8px 16px;border-radius:16px;font-size:14px}
+  #scanRing{position:absolute;left:50%;top:50%;width:min(70vw,320px);height:calc(min(70vw,320px) * 1.3);
+    transform:translate(-50%,-50%);border:3px dashed rgba(255,255,255,.85);border-radius:14px;
+    pointer-events:none;z-index:4}
+  #camDenied{padding:32px;max-width:420px}
+
+  /* ---- chat panel (in-browser LLM conversation) ---- */
+  #hud button#chatBtn{font-size:18px;padding:8px 12px}
+  #chatPanel{display:none;position:absolute;left:10px;right:10px;
+    bottom:calc(env(safe-area-inset-bottom,0px) + 74px);z-index:6;
+    background:rgba(252,252,248,.97);border:2.5px solid var(--ink);border-radius:16px;
+    padding:10px;max-height:46vh;box-shadow:2px 4px 0 rgba(38,38,46,.2)}
+  #chatPanel.active{display:flex;flex-direction:column;gap:6px}
+  #chatLog{overflow-y:auto;max-height:26vh;font-size:14px;line-height:1.5;padding:2px 4px}
+  #chatLog .msg{margin:4px 0}
+  #chatLog .msg.user{color:var(--ink);text-align:right}
+  #chatLog .msg.char{color:var(--redpen)}
+  #chatStatus{font-size:12px;color:var(--pencil);min-height:1.3em;padding:0 4px}
+  #chatRow{display:flex;gap:6px;align-items:center}
+  #chatRow input{flex:1;font-size:14px;padding:9px 10px;border:1.5px solid var(--pencil);
+    border-radius:8px;background:#fff}
+  #chatRow button{padding:8px 10px;margin:0;font-size:14px}
+  #chatMicBtn.listening{background:var(--redpen);color:#fff;border-color:var(--redpen)}
+</style>
+</head>
+<body>
+
+<!-- ================= HOME ================= -->
+<div class="screen active" id="home">
+  <h1>SketchAlive</h1>
+  <p class="tagline">Draw it. Scan it. Watch it escape.</p>
+  <div style="height:34px"></div>
+  <p class="prompt" data-i18n="drawPrompt">手と足のあるやつを、紙に描いて。</p>
+  <div id="arrow">↓</div>
+  <button class="primary" id="scanBtn" data-i18n="scan">落書きをスキャン</button>
+  <div><button class="ghost" id="arBtn" data-i18n="arScan" style="font-size:15px">ライブカメラで映す（実験的）</button></div>
+  <p class="small" data-i18n="noCam">カメラが使えない？ 練習台で試す：</p>
+  <div class="presets">
+    <button data-preset="normal">Normal Guy</button>
+    <button data-preset="longleg">Long Leg Guy</button>
+    <button data-preset="disaster">Absolute Disaster</button>
+  </div>
+  <button class="ghost" id="langBtn" style="margin-top:18px;font-size:13px">EN / 日本語</button>
+</div>
+
+<!-- ================= LOADING ================= -->
+<div class="screen" id="loading">
+  <svg id="scribbleLoader" viewBox="0 0 120 60">
+    <path d="M8 40 Q 20 10 32 38 T 56 36 Q 66 12 78 40 T 112 34"/>
+  </svg>
+  <p id="loadingMsg"></p>
+</div>
+
+<!-- ================= CORNERS (confirm/adjust detected paper) ================= -->
+<div class="screen" id="corners">
+  <p class="prompt" data-i18n="cornerPrompt" style="font-size:17px">紙の四隅を確認・調整してください</p>
+  <div id="cornerWrap">
+    <canvas id="cornerCanvas"></canvas>
+    <div class="handle" id="h0" data-i="0"></div>
+    <div class="handle" id="h1" data-i="1"></div>
+    <div class="handle" id="h2" data-i="2"></div>
+    <div class="handle" id="h3" data-i="3"></div>
+  </div>
+  <div id="cornerRow">
+    <button class="primary" id="cornerOkBtn" data-i18n="cornerOk">これでスキャン</button>
+    <button class="ghost" id="cornerFullBtn" data-i18n="cornerFull">紙全体を使う</button>
+    <button class="ghost" id="cornerBackBtn" data-i18n="retake">撮り直す</button>
+  </div>
+</div>
+
+<!-- ================= FOUND / ERROR ================= -->
+<div class="screen" id="found">
+  <p id="foundLine"></p>
+  <p id="foundSub"></p>
+  <canvas id="foundPreview"></canvas>
+  <div id="foundButtons"></div>
+  <button class="ghost" id="debugToggleBtn" style="font-size:12px;margin-top:6px">🐛 Debug</button>
+  <div id="debugPanel">
+    <div id="debugTabs">
+      <button data-tab="mask">ink mask</button>
+      <button data-tab="components">components</button>
+      <button data-tab="joints">15 joints</button>
+      <button data-tab="paper">paper detect</button>
+    </div>
+    <div id="debugCanvasWrap"><canvas id="debugCanvas"></canvas></div>
+    <div id="debugStats"></div>
+  </div>
+</div>
+
+<!-- ================= LIVE ================= -->
+<div class="screen" id="live">
+  <video id="camVideo" autoplay playsinline muted></video>
+  <canvas id="stage"></canvas>
+  <div id="scanRing"></div>
+  <div id="arHint"><span id="arHintText"></span></div>
+  <div id="bubble"></div>
+  <div id="hud">
+    <button id="chatBtn" title="Talk">💬</button>
+    <button id="recBtn">● 10s</button>
+    <button id="againBtn" data-i18n="again">新しい落書き</button>
+  </div>
+  <div id="chatPanel">
+    <div id="chatLog"></div>
+    <div id="chatStatus"></div>
+    <div id="chatRow">
+      <button id="chatMicBtn" title="Speak">🎤</button>
+      <input id="chatText" type="text" data-i18n-placeholder="chatPlaceholder" placeholder="Say something...">
+      <button id="chatSendBtn" data-i18n="chatSend">Send</button>
+      <button id="chatCloseBtn" class="ghost">✕</button>
+    </div>
+  </div>
+  <div id="freeBtnWrap"><button class="primary" id="freeBtn">SET IT FREE</button></div>
+  <div id="arScanBtnWrap" style="display:none;position:absolute;left:0;right:0;bottom:calc(env(safe-area-inset-bottom,0px) + 26px);text-align:center;z-index:5">
+    <button class="primary" id="arScanBtn" data-i18n="arScanBtn">紙をスキャン</button>
+  </div>
+  <div id="hint" data-i18n="hint">タップで話す・つかんで運べる・ダブルタップでダンス</div>
+</div>
+
+<!-- ================= CAMERA DENIED ================= -->
+<div class="screen" id="camDenied">
+  <p class="prompt" data-i18n="camDeniedMsg">カメラを使えませんでした。設定でカメラ権限を許可するか、写真から試してください。</p>
+  <button class="primary" id="camDeniedPhotoBtn" data-i18n="scan">落書きをスキャン</button>
+  <button class="ghost" id="camDeniedBackBtn" data-i18n="retake">戻る</button>
+</div>
+
+<input type="file" id="fileInput" accept="image/*" capture="environment">
+<canvas id="hiddenCanvas" style="display:none"></canvas>
+<a class="credit" href="#" onclick="return false">#SketchAlive</a>
+
+<script src="core.js"></script>
+<script>
+"use strict";
+/* =====================================================================
+   SketchAlive prototype runtime
+   HOME -> LOADING -> FOUND -> LIVE(escape / talk / drag / dance / record)
+   ===================================================================== */
+
+const $ = s => document.querySelector(s);
+const screens = { home: $("#home"), loading: $("#loading"), corners: $("#corners"),
+  found: $("#found"), live: $("#live"), camDenied: $("#camDenied") };
+function show(name){ Object.values(screens).forEach(s=>s.classList.remove("active")); screens[name].classList.add("active"); }
+
+/* ---------------- i18n + voice lines ---------------- */
+let LANG = (navigator.language||"en").startsWith("ja") ? "ja" : "en";
+const UI = {
+  ja:{ drawPrompt:"手と足のあるやつを、紙に描いて。", scan:"落書きをスキャン",
+       noCam:"カメラが使えない？ 練習台で試す：", again:"新しい落書き",
+       hint:"タップで話す・つかんで運べる・ダブルタップでダンス",
+       found:"なにか、いる。", foundLegs:"……足が生えてる。", free:"SET IT FREE",
+       retake:"撮り直す", tryAnyway:"かまわず動かす", defies:"この生き物は既知の解剖学に反しています。",
+       noInk:"紙に何も見つからなかった…", usePreset:"練習台を使う",
+       arScan:"ライブカメラで映す（実験的）", cornerPrompt:"紙の四隅を確認・調整してください",
+       cornerOk:"これでスキャン", cornerFull:"紙全体を使う",
+       arScanBtn:"紙をスキャン", arLookFor:"紙を四角のワクに合わせてください",
+       arLost:"紙をもう一度映してください", camDeniedMsg:"カメラを使えませんでした。設定でカメラ権限を許可するか、写真から試してください。",
+       badImage:"この画像は開けませんでした。別の写真を試してください。", noPaper:"紙が見つかりませんでした。もう一度、紙全体が写るように撮ってください。",
+       chatPlaceholder:"何か話しかけてみて…", chatSend:"送信",
+       chatLoading:"会話モデルを読み込み中…（初回のみ、数十MB〜）",
+       chatNoGpu:"この端末/ブラウザは会話機能に対応していません（WebGPUが必要）。",
+       chatNoMic:"この端末では音声入力に対応していません。テキストで話しかけてください。",
+       chatListening:"聞いています…", chatThinking:"考え中…" },
+  en:{ drawPrompt:"Draw something with arms and legs.", scan:"Scan my doodle",
+       noCam:"No camera? Try a practice doodle:", again:"New doodle",
+       hint:"Tap to talk · drag to carry · double-tap to dance",
+       found:"We found a creature.", foundLegs:"Uh oh. It has legs.", free:"SET IT FREE",
+       retake:"Take another photo", tryAnyway:"Try anyway", defies:"Your creature defies known anatomy.",
+       noInk:"We found… nothing on that paper.", usePreset:"Use a practice doodle",
+       arScan:"Try live camera (experimental)", cornerPrompt:"Check / adjust the paper's four corners",
+       cornerOk:"Scan this", cornerFull:"Use the whole photo",
+       arScanBtn:"Scan the paper", arLookFor:"Line the paper up with the frame",
+       arLost:"Show the paper to the camera again", camDeniedMsg:"Couldn't access the camera. Allow camera access in settings, or try a photo instead.",
+       badImage:"Couldn't open that image. Try another photo.", noPaper:"No paper found. Try again with the whole sheet in frame.",
+       chatPlaceholder:"Say something...", chatSend:"Send",
+       chatLoading:"Loading the chat model... (first time only, tens of MB+)",
+       chatNoGpu:"Chat isn't supported on this device/browser (needs WebGPU).",
+       chatNoMic:"Voice input isn't supported here. Type instead.",
+       chatListening:"Listening...", chatThinking:"Thinking..." },
+};
+const LINES = {
+  ja:{
+    spawn:["やっと外に出られた！","自由だーーーー！","3分前に生まれました。","描いた責任、取ってね。"],
+    tap:["もう少し上手く描けなかった？","これが俺の顔…？","この体で生きろって？","作者を訴えたい。","待って、消しゴムだけはやめて。"],
+    drop:["ちょっと！","ひどい。"],
+    dance:["いいよ、一曲だけね。"],
+    largeHead:["首が痛い。"], shortLegs:["なんで足が4ピクセルなの？"],
+    noArms:["いいね。腕なし。"], lowConf:["自分でも自分が何なのか分からない。"],
+    ugly:["自然は過ちを犯した。"],
+  },
+  en:{
+    spawn:["Finally. Freedom.","I was born 12 seconds ago.","You drew me. This is your responsibility.","I refuse to go back into the notebook."],
+    tap:["You couldn't draw better legs?","This is my face?","I have several questions about my anatomy.","Please keep the eraser away from me."],
+    drop:["HEY!","Rude."],
+    dance:["Fine. One dance."],
+    largeHead:["My neck hurts."], shortLegs:["Why are my legs 4 pixels long?"],
+    noArms:["Cool. No arms."], lowConf:["I don't know what I am either."],
+    ugly:["Nature has made a mistake."],
+  },
+};
+const LOADING_MSGS = {
+  ja:["怪しい解剖学を調査中…","足を探しています…","骨格と交渉中…","歩き方を教えています…","これは間違いだったかもしれない。"],
+  en:["Examining questionable anatomy...","Finding the legs...","Negotiating with the skeleton...","Teaching it how to walk...","This may have been a mistake."],
+};
+function applyLang(){
+  document.querySelectorAll("[data-i18n]").forEach(el=>{ el.textContent = UI[LANG][el.dataset.i18n]; });
+  document.querySelectorAll("[data-i18n-placeholder]").forEach(el=>{ el.placeholder = UI[LANG][el.dataset.i18nPlaceholder]; });
+  $("#freeBtn").textContent = UI[LANG].free;
+}
+$("#langBtn").onclick = ()=>{ LANG = LANG==="ja"?"en":"ja"; applyLang(); };
+applyLang();
+const pick = arr => arr[(Math.random()*arr.length)|0];
+
+/* ---------------- speech ---------------- */
+let speaking = false;
+function say(text, cb){
+  const b = $("#bubble");
+  b.textContent = text; b.style.display = "block";
+  speaking = true;
+  const done = ()=>{ speaking=false; b.style.display="none"; cb&&cb(); };
+  try{
+    speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = LANG==="ja"?"ja-JP":"en-US";
+    u.rate = 1.05; u.pitch = 1.3;
+    u.onend = done; u.onerror = done;
+    speechSynthesis.speak(u);
+    setTimeout(()=>{ if(speaking) done(); }, 6000); // safety
+  }catch(e){ setTimeout(done, Math.max(1500, text.length*90)); }
+  if(app.recorder) playBlipTalk(text); // recording audio (spec Phase 4) -- see below
+}
+
+/* ---------------- Web Audio "blip talk" (recording audio, spec Phase 4) ----
+ * speechSynthesis output cannot be captured into a MediaStream in any
+ * browser, so it can't end up in the recorded video. Instead, WHILE
+ * recording only, each say() also plays a synthesized Animal-Crossing-style
+ * blip burst -- one short tone per ~2 characters of text -- routed to a
+ * MediaStreamAudioDestinationNode that gets mixed into the recording. Live
+ * (non-recording) playback is completely unchanged: this never touches
+ * speakers, only the recording's audio track. If Web Audio is unavailable
+ * the recording is silent and the on-screen caption bubble is the fallback,
+ * exactly as the brief allows. ------------------------------------------- */
+let audioCtx=null, recordDest=null;
+function ensureAudioCtx(){
+  if(audioCtx) return audioCtx;
+  const Ctx=window.AudioContext||window.webkitAudioContext;
+  if(!Ctx) return null;
+  audioCtx=new Ctx();
+  recordDest=audioCtx.createMediaStreamDestination();
+  // A MediaStreamAudioDestinationNode with ZERO nodes ever connected to it
+  // (e.g. a recording where the character never talks) makes MediaRecorder
+  // stall the WHOLE recording -- video included -- after ~1s, even though
+  // the track itself stays "live" and throws no error (confirmed by direct
+  // testing: identical setup with vs without a permanently-connected silent
+  // oscillator was the difference between an 8s recording truncating to
+  // ~0.5s vs completing in full). Keeping one silent (gain=0), always-on
+  // oscillator connected for the audioCtx's entire lifetime keeps the graph
+  // "live" and avoids the stall regardless of whether playBlipTalk() ever
+  // actually fires during a given recording.
+  const keepAlive=audioCtx.createOscillator(), silence=audioCtx.createGain();
+  silence.gain.value=0;
+  keepAlive.connect(silence); silence.connect(recordDest);
+  keepAlive.start();
+  return audioCtx;
+}
+function playBlipTalk(text){
+  const ctx=ensureAudioCtx();
+  if(!ctx || !recordDest) return;
+  const n=Math.max(3, Math.round(text.length/2.2));
+  const blipDur=0.055, gap=0.045;
+  let t=ctx.currentTime+0.02;
+  for(let i=0;i<n;i++){
+    const osc=ctx.createOscillator(), gain=ctx.createGain();
+    osc.type="square";
+    osc.frequency.value=340+Math.random()*260;
+    gain.gain.setValueAtTime(0,t);
+    gain.gain.linearRampToValueAtTime(0.16,t+0.008);
+    gain.gain.linearRampToValueAtTime(0,t+blipDur);
+    osc.connect(gain); gain.connect(recordDest);
+    osc.start(t); osc.stop(t+blipDur+0.01);
+    t+=blipDur+gap;
+  }
+}
+
+/* =====================================================================
+   Character: FK skeleton + linear blend skinning on a textured 2D mesh
+   ===================================================================== */
+const HIER = { // child -> parent
+  neck:"root", head:"neck",
+  shoulder_left:"neck", elbow_left:"shoulder_left", hand_left:"elbow_left",
+  shoulder_right:"neck", elbow_right:"shoulder_right", hand_right:"elbow_right",
+  hip_left:"root", knee_left:"hip_left", foot_left:"knee_left",
+  hip_right:"root", knee_right:"hip_right", foot_right:"knee_right",
+};
+
+class Character{
+  constructor(result, srcCanvas){
+    this.res = result;
+    this.joints0 = result.joints;              // rest pose (image coords)
+    this.mesh = result.mesh;
+    this.traits = result.traits;
+    this.buildTexture(srcCanvas);
+    this.buildRest();
+    // world state
+    this.x = 0; this.y = 0;                     // ground-contact point (world px)
+    this.scale = 1; this.dir = 1;               // facing: 1 right, -1 left
+    this.rotation = 0;                          // in-plane tilt (AR paper tracking only)
+    this.vy = 0; this.onGround = true; this.groundY = 0;
+    this.action = "idle"; this.at = 0;          // action time
+    this.timeline = null;                       // escape script
+    this.bounce = 0;                            // talk bounce
+  }
+  buildTexture(src){
+    const { bbox, mask } = this.res, pad = 4;
+    const w = bbox.w + pad*2, h = bbox.h + pad*2;
+    const t = document.createElement("canvas"); t.width=w; t.height=h;
+    const tc = t.getContext("2d");
+    const sctx = src.getContext("2d");
+    const img = sctx.getImageData(bbox.x, bbox.y, bbox.w, bbox.h);
+    const out = tc.createImageData(w, h);
+    // alpha from mask dilated by 1px so strokes keep their edges
+    const W = src.width;
+    for(let y=0;y<bbox.h;y++)for(let x=0;x<bbox.w;x++){
+      const gx=bbox.x+x, gy=bbox.y+y;
+      let a=0;
+      for(let dy=-1;dy<=1&&!a;dy++)for(let dx=-1;dx<=1&&!a;dx++){
+        const xx=gx+dx, yy=gy+dy;
+        if(xx>=0&&yy>=0&&xx<W&&yy<src.height&&mask[yy*W+xx]) a=255;
+      }
+      if(!a) continue;
+      const si=(y*bbox.w+x)*4, di=((y+pad)*w+(x+pad))*4;
+      out.data[di]=img.data[si]; out.data[di+1]=img.data[si+1];
+      out.data[di+2]=img.data[si+2]; out.data[di+3]=a;
+    }
+    tc.putImageData(out,0,0);
+    this.tex = t;
+    this.texOff = { x: bbox.x - pad, y: bbox.y - pad }; // image coords -> texture coords
+  }
+  buildRest(){
+    const J = this.joints0;
+    this.restOffset = {};                       // child local offset from parent
+    for(const [c,p] of Object.entries(HIER))
+      this.restOffset[c] = [J[c][0]-J[p][0], J[c][1]-J[p][1]];
+    this.restAngle = {};                        // rest world angle of each bone segment
+    this.boneJoints = this.res.boneDefs.map(([name,a,b])=>({name,a,b}));
+    // anchor: point between rest feet = ground contact in texture space
+    this.anchor = [ J.root[0], Math.max(J.foot_left[1], J.foot_right[1]) ];
+    this.height = this.res.bbox.h;
+  }
+  /* FK: pose = {jointName: localAngle}, plus root offsets */
+  solve(pose){
+    const J0=this.joints0, P={}, A={};
+    P.root=[J0.root[0]+(pose.rootDX||0), J0.root[1]+(pose.rootDY||0)];
+    A.root=pose.root||0;
+    const order=["neck","head","shoulder_left","elbow_left","hand_left",
+      "shoulder_right","elbow_right","hand_right","hip_left","knee_left","foot_left",
+      "hip_right","knee_right","foot_right"];
+    for(const j of order){
+      const p=HIER[j], off=this.restOffset[j], a=A[p];
+      const c=Math.cos(a), s=Math.sin(a);
+      P[j]=[P[p][0]+off[0]*c-off[1]*s, P[p][1]+off[0]*s+off[1]*c];
+      A[j]=a+(pose[j]||0);
+    }
+    return P;
+  }
+  /* per-bone affine (rest seg -> posed seg), then blend vertices */
+  deform(pose){
+    const J0=this.joints0, J1=this.solve(pose);
+    const mats=this.boneJoints.map(b=>{
+      const a0=J0[b.a], b0=J0[b.b], a1=J1[b.a], b1=J1[b.b];
+      const th=Math.atan2(b1[1]-a1[1],b1[0]-a1[0])-Math.atan2(b0[1]-a0[1],b0[0]-a0[0]);
+      const c=Math.cos(th), s=Math.sin(th);
+      // M = T(a1) R(th) T(-a0)
+      return [c,-s,a1[0]-c*a0[0]+s*a0[1], s,c,a1[1]-s*a0[0]-c*a0[1]];
+    });
+    const V=this.mesh.vertices, out=this._defBuf||(this._defBuf=new Float32Array(V.length*2));
+    for(let i=0;i<V.length;i++){
+      const v=V[i]; let x=0,y=0;
+      for(const wgt of v.weights){
+        const m=mats[wgt.bone];
+        x+=wgt.w*(m[0]*v.x+m[1]*v.y+m[2]);
+        y+=wgt.w*(m[3]*v.x+m[4]*v.y+m[5]);
+      }
+      out[i*2]=x; out[i*2+1]=y;
+    }
+    this.headPos=J1.head;
+    return out;
+  }
+  draw(ctx, pose){
+    const d=this.deform(pose);
+    const V=this.mesh.vertices, T=this.mesh.triangles;
+    const s=this.scale, ax=this.anchor[0], ay=this.anchor[1], rot=this.rotation||0;
+    ctx.save();
+    ctx.translate(this.x, this.y - this.bounce);
+    if(rot) ctx.rotate(rot);
+    ctx.scale(s*this.dir, s);
+    ctx.translate(-ax, -ay);
+    const ox=this.texOff.x, oy=this.texOff.y;
+    for(const tri of T){
+      const [i0,i1,i2]=tri;
+      const x0=d[i0*2],y0=d[i0*2+1],x1=d[i1*2],y1=d[i1*2+1],x2=d[i2*2],y2=d[i2*2+1];
+      const u0=V[i0].u-ox,v0=V[i0].v-oy,u1=V[i1].u-ox,v1=V[i1].v-oy,u2=V[i2].u-ox,v2=V[i2].v-oy;
+      drawTri(ctx,this.tex,x0,y0,x1,y1,x2,y2,u0,v0,u1,v1,u2,v2);
+    }
+    ctx.restore();
+    // head position in world (for the speech bubble) -- account for rotation too
+    const hp=this.headPos;
+    const lx=(hp[0]-ax)*s*this.dir, ly=(hp[1]-ay)*s;
+    const cos=Math.cos(rot), sin=Math.sin(rot);
+    this.headWorld=[ this.x + (lx*cos - ly*sin), this.y - this.bounce + (lx*sin + ly*cos) ];
+  }
+  hitTest(px,py){
+    const s=this.scale, b=this.res.bbox;
+    const w=b.w*s, h=b.h*s;
+    return px>this.x-w*0.6 && px<this.x+w*0.6 && py>this.y-h*1.1 && py<this.y+6;
+  }
+}
+
+/* affine texture-mapped triangle with 0.5px inflation to hide seams */
+function drawTri(ctx,img,x0,y0,x1,y1,x2,y2,u0,v0,u1,v1,u2,v2){
+  const cx=(x0+x1+x2)/3, cy=(y0+y1+y2)/3, k=1.03;
+  const X0=cx+(x0-cx)*k, Y0=cy+(y0-cy)*k, X1=cx+(x1-cx)*k, Y1=cy+(y1-cy)*k, X2=cx+(x2-cx)*k, Y2=cy+(y2-cy)*k;
+  ctx.save();
+  ctx.beginPath(); ctx.moveTo(X0,Y0); ctx.lineTo(X1,Y1); ctx.lineTo(X2,Y2); ctx.closePath(); ctx.clip();
+  const du1=u1-u0,dv1=v1-v0,du2=u2-u0,dv2=v2-v0;
+  const dx1=x1-x0,dy1=y1-y0,dx2=x2-x0,dy2=y2-y0;
+  const det=du1*dv2-du2*dv1;
+  if(Math.abs(det)<1e-6){ ctx.restore(); return; }
+  const a=(dx1*dv2-dx2*dv1)/det, b=(dx2*du1-dx1*du2)/det;
+  const c=(dy1*dv2-dy2*dv1)/det, dd=(dy2*du1-dy1*du2)/det;
+  ctx.transform(a,c,b,dd, x0-a*u0-b*v0, y0-c*u0-dd*v0);
+  ctx.drawImage(img,0,0);
+  ctx.restore();
+}
+
+/* ---------------- pose generators ---------------- */
+const POSES = {
+  idle(t){ const b=Math.sin(t*2.2)*0.04;
+    return { rootDY:Math.sin(t*2.2)*1.5, shoulder_left:b, shoulder_right:-b,
+             neck:Math.sin(t*1.1)*0.03, head:Math.sin(t*0.9)*0.05 }; },
+  walk(t){ const p=t*7, sw=Math.sin(p);
+    return { hip_left:sw*0.55, hip_right:-sw*0.55,
+      knee_left:Math.max(0,Math.sin(p-1.4))*0.9, knee_right:Math.max(0,Math.sin(p+1.74))*0.9,
+      shoulder_left:-sw*0.4, shoulder_right:sw*0.4,
+      elbow_left:-0.25, elbow_right:0.25,
+      rootDY:Math.abs(Math.cos(p))* -2.2, root:0.04, head:Math.sin(p*2)*0.03 }; },
+  wave(t){ return { shoulder_right:-2.3, elbow_right:Math.sin(t*9)*0.6-0.4,
+      neck:0.08, rootDY:Math.sin(t*2)*1 }; },
+  dance(t){ const p=t*8;
+    return { root:Math.sin(p/2)*0.12, rootDY:Math.abs(Math.sin(p))*-5,
+      shoulder_left:-1.6+Math.sin(p)*0.7, shoulder_right:1.6+Math.sin(p+Math.PI)*0.7,
+      elbow_left:Math.sin(p*1.3)*0.5, elbow_right:-Math.sin(p*1.3)*0.5,
+      hip_left:Math.sin(p)*0.3, hip_right:-Math.sin(p)*0.3,
+      knee_left:Math.max(0,Math.sin(p))*0.5, knee_right:Math.max(0,-Math.sin(p))*0.5,
+      head:Math.sin(p)*0.15 }; },
+  jump(){ return { hip_left:0.7, hip_right:0.7, knee_left:1.1, knee_right:1.1,
+      shoulder_left:-2.4, shoulder_right:2.4, root:-0.05 }; },
+  panic(t){ const p=t*14;
+    return { shoulder_left:-2.6+Math.sin(p)*0.4, shoulder_right:2.6-Math.sin(p)*0.4,
+      hip_left:Math.sin(p)*0.5, hip_right:-Math.sin(p)*0.5,
+      knee_left:0.6, knee_right:0.6, head:Math.sin(p*1.4)*0.12 }; },
+  lookLeft(){ return { neck:-0.28, head:-0.18 }; },
+  lookRight(){ return { neck:0.28, head:0.18 }; },
+  hesitate(t){ return { root:-0.08, neck:0.15, head:0.2, rootDY:Math.sin(t*3)*1,
+      knee_left:0.15, knee_right:0.15 }; },
+};
+
+/* =====================================================================
+   Scene / app state
+   ===================================================================== */
+const stage = $("#stage");
+const sctx = stage.getContext("2d");
+let DPR = Math.min(2, window.devicePixelRatio||1);
+function resize(){
+  stage.width = innerWidth*DPR; stage.height = innerHeight*DPR;
+  stage.style.width = innerWidth+"px"; stage.style.height = innerHeight+"px";
+  sctx.setTransform(DPR,0,0,DPR,0,0);
+  if(app.state==="live" && !app.arMode) layoutPaper();
+  if(app.state==="corners") layoutCornerHandles();
+}
+addEventListener("resize", resize);
+
+const app = {
+  state:"home", srcCanvas:null, result:null, char:null,
+  paper:null, deskY:0, escaped:false, holeAlpha:0,
+  lastTime:0, tapInfo:null, dragging:false, recorder:null,
+  arMode:false, busy:false,
+};
+window.app = app; // debugging / e2e-testing hook only, not used by app logic
+
+/* ---------------- image loading (EXIF-safe, validated) ---------------- */
+const MAX_CAPTURE_DIM = 900; // working resolution before any paper-crop/downscale
+async function loadImageAsCanvas(file){
+  if(!file || !file.type || !file.type.startsWith("image/")) throw new Error("not_an_image");
+  let bitmap;
+  if(window.createImageBitmap){
+    // {imageOrientation:'from-image'} applies EXIF rotation automatically
+    // (Safari 15+/Chrome/Firefox all support this) so sideways phone photos
+    // come in right-side-up without hand-rolled EXIF parsing.
+    try{ bitmap = await createImageBitmap(file, {imageOrientation:"from-image"}); }
+    catch(e){ bitmap = await createImageBitmap(file); }
+  } else {
+    bitmap = await new Promise((resolve,reject)=>{
+      const url=URL.createObjectURL(file), img=new Image();
+      img.onload=()=>{ URL.revokeObjectURL(url); resolve(img); };
+      img.onerror=()=>{ URL.revokeObjectURL(url); reject(new Error("decode_failed")); };
+      img.src=url;
+    });
+  }
+  const iw=bitmap.width||bitmap.naturalWidth, ih=bitmap.height||bitmap.naturalHeight;
+  if(!iw || !ih) throw new Error("decode_failed");
+  const k=Math.min(1, MAX_CAPTURE_DIM/Math.max(iw,ih));
+  const c=document.createElement("canvas");
+  c.width=Math.max(1,Math.round(iw*k)); c.height=Math.max(1,Math.round(ih*k));
+  c.getContext("2d").drawImage(bitmap,0,0,c.width,c.height);
+  if(bitmap.close) bitmap.close();
+  return c;
+}
+
+/* ---------------- capture / presets ---------------- */
+$("#scanBtn").onclick = ()=>{ app.arMode=false; $("#fileInput").click(); };
+$("#fileInput").onchange = async e=>{
+  const f=e.target.files && e.target.files[0];
+  e.target.value="";
+  if(!f || app.busy) return;
+  app.busy=true;
+  try{
+    const canvas = await loadImageAsCanvas(f);
+    openCornerScreen(canvas, warped=>processImage(warped));
+  }catch(err){
+    show("found");
+    $("#foundLine").textContent=UI[LANG].defies;
+    $("#foundSub").textContent=UI[LANG].badImage;
+    $("#foundPreview").style.display="none";
+    const fb=$("#foundButtons"); fb.innerHTML="";
+    const b1=document.createElement("button"); b1.textContent=UI[LANG].retake; b1.className="primary";
+    b1.onclick=()=>$("#fileInput").click();
+    fb.append(b1);
+  } finally { app.busy=false; }
+};
+document.querySelectorAll("[data-preset]").forEach(b=>{
+  b.onclick=()=>{ if(app.busy) return; processImage(makePreset(b.dataset.preset)); };
+});
+
+/* ---------------- corner confirm/adjust screen ---------------- */
+const cornerState = { corners:null, dragIndex:-1, onConfirm:null };
+function openCornerScreen(canvas, onConfirm){
+  cornerState.onConfirm = onConfirm;
+  app.state = "corners";
+  const cc=$("#cornerCanvas");
+  cc.width=canvas.width; cc.height=canvas.height;
+  cc.getContext("2d").drawImage(canvas,0,0);
+  let quad=null;
+  try{
+    const data=canvas.getContext("2d").getImageData(0,0,canvas.width,canvas.height);
+    const res=SketchAliveCore.detectPaperQuad(data);
+    if(res.found) quad=res.corners;
+  }catch(e){ /* fall through to default quad */ }
+  if(!quad){
+    const pad=Math.min(canvas.width,canvas.height)*0.05;
+    quad=[[pad,pad],[canvas.width-pad,pad],[canvas.width-pad,canvas.height-pad],[pad,canvas.height-pad]];
+  }
+  cornerState.corners = quad.map(p=>p.slice());
+  cornerState._srcCanvas = canvas;
+  show("corners");
+  layoutCornerHandles();
+}
+function layoutCornerHandles(){
+  if(app.state!=="corners" || !cornerState.corners) return;
+  const cc=$("#cornerCanvas"), rect=cc.getBoundingClientRect();
+  if(!rect.width) return;
+  const sx=rect.width/cc.width, sy=rect.height/cc.height;
+  cornerState.corners.forEach((p,i)=>{
+    const h=$("#h"+i);
+    h.style.left=(p[0]*sx)+"px"; h.style.top=(p[1]*sy)+"px";
+  });
+}
+[0,1,2,3].forEach(i=>{
+  const h=$("#h"+i);
+  h.addEventListener("pointerdown", e=>{ cornerState.dragIndex=i; h.setPointerCapture(e.pointerId); });
+  h.addEventListener("pointermove", e=>{
+    if(cornerState.dragIndex!==i) return;
+    const cc=$("#cornerCanvas"), rect=cc.getBoundingClientRect();
+    const sx=cc.width/rect.width, sy=cc.height/rect.height;
+    const x=Math.max(0,Math.min(cc.width,(e.clientX-rect.left)*sx));
+    const y=Math.max(0,Math.min(cc.height,(e.clientY-rect.top)*sy));
+    cornerState.corners[i]=[x,y];
+    layoutCornerHandles();
+  });
+  h.addEventListener("pointerup", ()=>{ cornerState.dragIndex=-1; });
+});
+$("#cornerOkBtn").onclick=()=>{
+  if(app.busy) return; app.busy=true;
+  const src=cornerState._srcCanvas;
+  const imgData=src.getContext("2d").getImageData(0,0,src.width,src.height);
+  const outW=Math.round(src.width*0.9), outH=Math.round(src.height*0.9);
+  const warped=SketchAliveCore.warpQuadToRect(imgData, cornerState.corners, outW, outH);
+  const outCanvas=document.createElement("canvas");
+  outCanvas.width=outW; outCanvas.height=outH;
+  outCanvas.getContext("2d").putImageData(new ImageData(new Uint8ClampedArray(warped.data), outW, outH), 0, 0);
+  app.lastPaperQuad=cornerState.corners.map(p=>p.slice());
+  const cb=cornerState.onConfirm; app.busy=false;
+  cb && cb(outCanvas);
+};
+$("#cornerFullBtn").onclick=()=>{
+  if(app.busy || !cornerState._srcCanvas) return;
+  app.lastPaperQuad=null;
+  const cb=cornerState.onConfirm;
+  cb && cb(cornerState._srcCanvas);
+};
+$("#cornerBackBtn").onclick=()=>{
+  app.state="home";
+  if(app.arMode){ startAR(); } else { show("home"); }
+};
+
+function makePreset(kind){
+  const c=document.createElement("canvas"); c.width=480; c.height=640;
+  const x=c.getContext("2d");
+  x.fillStyle="#FCFCF8"; x.fillRect(0,0,480,640);
+  x.strokeStyle="#F0E4C8"; x.lineWidth=1;          // faint ruled lines
+  for(let y=60;y<640;y+=48){ x.beginPath(); x.moveTo(20,y); x.lineTo(460,y); x.stroke(); }
+  x.strokeStyle="#2A2A32"; x.lineWidth=7; x.lineCap="round";
+  const wob=(x0,y0,x1,y1)=>{ // wobbly hand-drawn line
+    x.beginPath(); x.moveTo(x0,y0);
+    const n=6;
+    for(let i=1;i<=n;i++){ const t=i/n;
+      x.lineTo(x0+(x1-x0)*t+(Math.random()-.5)*6, y0+(y1-y0)*t+(Math.random()-.5)*6); }
+    x.stroke();
+  };
+  const circle=(cx,cy,r)=>{ x.beginPath();
+    for(let a=0;a<=Math.PI*2+0.1;a+=0.25){
+      const rr=r+(Math.random()-.5)*4;
+      const px=cx+Math.cos(a)*rr, py=cy+Math.sin(a)*rr;
+      a===0?x.moveTo(px,py):x.lineTo(px,py); }
+    x.stroke(); };
+  if(kind==="normal"){
+    circle(240,150,55); wob(240,205,240,390);
+    wob(240,250,150,330); wob(240,250,330,330);
+    wob(240,390,180,540); wob(240,390,300,540);
+    x.lineWidth=4; wob(220,140,228,140); wob(252,140,260,140); wob(222,172,258,168); // face
+  }else if(kind==="longleg"){
+    circle(240,110,45); wob(240,155,240,260);
+    wob(240,190,170,250); wob(240,190,310,250);
+    wob(240,260,190,580); wob(240,260,290,580);
+    x.lineWidth=4; wob(226,102,232,102); wob(248,102,254,102);
+  }else{ // absolute disaster
+    circle(230,170,80);
+    wob(230,250,250,360);
+    wob(230,270,90,240); wob(240,280,400,320);
+    wob(250,360,200,430); wob(250,360,330,410);
+    x.lineWidth=4; circle(205,150,9); circle(265,160,14); wob(200,205,270,215);
+  }
+  return c;
+}
+
+/* ---------------- processing ---------------- */
+let processing=false; // guards double-tap re-entry into the (slow-ish) extraction step
+function processImage(imgOrCanvas){
+  if(processing) return;
+  processing=true;
+  show("loading");
+  const msgs=LOADING_MSGS[LANG]; let mi=0;
+  $("#loadingMsg").textContent=msgs[0];
+  const rot=setInterval(()=>{ mi=(mi+1)%msgs.length; $("#loadingMsg").textContent=msgs[mi]; },700);
+  const started=Date.now();
+
+  setTimeout(()=>{ // let the loading screen paint first
+    const MAX=640;
+    const iw=imgOrCanvas.width||imgOrCanvas.naturalWidth, ih=imgOrCanvas.height||imgOrCanvas.naturalHeight;
+    const k=Math.min(1, MAX/Math.max(iw,ih));
+    const c=document.createElement("canvas");
+    c.width=Math.round(iw*k); c.height=Math.round(ih*k);
+    c.getContext("2d").drawImage(imgOrCanvas,0,0,c.width,c.height);
+    const data=c.getContext("2d").getImageData(0,0,c.width,c.height);
+    let result=null, err=null;
+    try{ result=SketchAliveCore.extractCharacter(data); }catch(e){ err=e; }
+    const finish=()=>{ clearInterval(rot); processing=false; showFound(result, c, err); };
+    const wait=Math.max(0, 2600-(Date.now()-started)); // comedic minimum
+    setTimeout(finish, wait);
+  }, 60);
+}
+
+function showFound(result, srcCanvas, err){
+  show("found");
+  $("#debugPanel").classList.remove("active");
+  const T=UI[LANG], fb=$("#foundButtons"); fb.innerHTML="";
+  const preview=$("#foundPreview");
+  if(err || !result || !result.ok){
+    $("#foundLine").textContent = T.defies;
+    $("#foundSub").textContent = T.noInk;
+    preview.style.display="none";
+    const b1=document.createElement("button"); b1.textContent=T.retake; b1.className="primary";
+    b1.onclick=()=> app.arMode ? startAR() : $("#fileInput").click();
+    const b2=document.createElement("button"); b2.textContent=T.usePreset; b2.className="ghost";
+    b2.onclick=()=>{ app.arMode=false; processImage(makePreset("normal")); };
+    fb.append(b1,b2);
+    app.result=result||null; app.debugSrcCanvas=srcCanvas;
+    return;
+  }
+  app.srcCanvas=srcCanvas; app.result=result; app.debugSrcCanvas=srcCanvas;
+  // headline: easter-egg aware
+  const t=result.traits;
+  let line=T.found, sub=T.foundLegs;
+  if(t.not_humanoid){ sub=LINES[LANG].ugly[0]; }
+  else if(result.confidence<0.5){ line=T.found; sub=LINES[LANG].lowConf[0]; }
+  else if(t.arms_missing){ sub=LINES[LANG].noArms[0]; }
+  else if(t.large_head){ sub=LINES[LANG].largeHead[0]; }
+  else if(t.short_legs){ sub=LINES[LANG].shortLegs[0]; }
+  $("#foundLine").textContent=line;
+  $("#foundSub").textContent=sub;
+  // cutout preview
+  const ch=new Character(result, srcCanvas);
+  preview.style.display="block";
+  preview.width=ch.tex.width; preview.height=ch.tex.height;
+  preview.getContext("2d").drawImage(ch.tex,0,0);
+  const go=document.createElement("button"); go.textContent=T.free; go.className="primary";
+  go.onclick=()=> app.arMode ? startARLive(ch) : startLive(ch);
+  fb.append(go);
+}
+
+/* ---------------- debug panel (Phase 1) ---------------- */
+let debugTab="mask";
+$("#debugToggleBtn").onclick=()=>{
+  $("#debugPanel").classList.toggle("active");
+  if($("#debugPanel").classList.contains("active")) renderDebugPanel();
+};
+document.querySelectorAll("#debugTabs button").forEach(b=>{
+  b.onclick=()=>{ debugTab=b.dataset.tab; renderDebugPanel(); };
+});
+function renderDebugPanel(){
+  const r=app.result, src=app.debugSrcCanvas;
+  const dc=$("#debugCanvas"); const dx=dc.getContext("2d");
+  if(!r){ $("#debugStats").textContent="(no result)"; return; }
+  const dbg=r.debug||{};
+  const w=(dbg.width)||(src&&src.width)||1, h=(dbg.height)||(src&&src.height)||1;
+  dc.width=w; dc.height=h;
+  dx.clearRect(0,0,w,h);
+  if(debugTab==="mask" && dbg.rawMask){
+    const img=dx.createImageData(w,h);
+    for(let i=0;i<w*h;i++){ const v=dbg.rawMask[i]?0:255; img.data[i*4]=v;img.data[i*4+1]=v;img.data[i*4+2]=v;img.data[i*4+3]=255; }
+    dx.putImageData(img,0,0);
+    $("#debugStats").textContent=`threshold=${dbg.threshold}`;
+  } else if(debugTab==="components"){
+    if(src) dx.drawImage(src,0,0,w,h);
+    dx.globalAlpha=0.55;
+    (dbg.includedComponents||[]).forEach(c=>{ dx.strokeStyle="#1a8a3a"; dx.lineWidth=2;
+      dx.strokeRect(c.minX,c.minY,c.maxX-c.minX,c.maxY-c.minY); });
+    (dbg.excludedComponents||[]).forEach(c=>{ dx.strokeStyle="#c92a2a"; dx.lineWidth=2; dx.setLineDash([4,3]);
+      dx.strokeRect(c.minX,c.minY,c.maxX-c.minX,c.maxY-c.minY); dx.setLineDash([]); });
+    dx.globalAlpha=1;
+    $("#debugStats").textContent=
+      `components used (green)=${(dbg.includedComponents||[]).length}, rejected (red)=${(dbg.excludedComponents||[]).length}\n`+
+      (dbg.excludedComponents||[]).map(c=>`  rejected: reason=${c.reason} size=${c.size}`).join("\n");
+  } else if(debugTab==="joints"){
+    if(src) dx.drawImage(src,0,0,w,h);
+    if(r.bbox){ dx.strokeStyle="#1a56db"; dx.lineWidth=2; dx.strokeRect(r.bbox.x,r.bbox.y,r.bbox.w,r.bbox.h); }
+    if(r.joints){
+      Object.entries(r.joints).forEach(([name,p])=>{
+        dx.fillStyle="#e8442e"; dx.beginPath(); dx.arc(p[0],p[1],4,0,Math.PI*2); dx.fill();
+        dx.font="10px sans-serif"; dx.fillStyle="#26262E"; dx.fillText(name,p[0]+5,p[1]-5);
+      });
+    }
+    $("#debugStats").textContent=`confidence=${r.confidence.toFixed(2)}  warnings=${(r.warnings||[]).join(",")||"(none)"}  traits=${JSON.stringify(r.traits)}`;
+  } else if(debugTab==="paper"){
+    if(src) dx.drawImage(src,0,0,w,h);
+    if(app.lastPaperQuad){
+      dx.strokeStyle="#1a8a3a"; dx.lineWidth=3; dx.beginPath();
+      app.lastPaperQuad.forEach((p,i)=> i===0?dx.moveTo(p[0],p[1]):dx.lineTo(p[0],p[1]));
+      dx.closePath(); dx.stroke();
+    }
+    $("#debugStats").textContent = app.lastPaperQuad ? "last detected/confirmed paper quad (green)" : "(no paper-quad data for this capture)";
+  }
+}
+
+/* ---------------- live scene ---------------- */
+function layoutPaper(){
+  const W=innerWidth, H=innerHeight;
+  const src=app.srcCanvas;
+  const maxW=W*0.82, maxH=H*0.55;
+  const k=Math.min(maxW/src.width, maxH/src.height);
+  const pw=src.width*k, ph=src.height*k;
+  app.paper={ x:(W-pw)/2, y:H*0.08, w:pw, h:ph, k };
+  app.deskY=Math.min(H-40, app.paper.y+app.paper.h+H*0.22);
+  const ch=app.char;
+  if(ch){
+    ch.scale=k;
+    if(!app.escaped && !ch.timeline){
+      ch.x=app.paper.x+(ch.res.bbox.x+ch.res.bbox.w/2)*k;
+      ch.y=app.paper.y+(ch.res.bbox.y+ch.res.bbox.h)*k;
+      ch.groundY=ch.y;
+    }else{
+      ch.groundY=app.deskY; if(ch.onGround) ch.y=app.deskY;
+    }
+  }
+}
+
+function startLive(ch){
+  app.char=ch; app.escaped=false; app.holeAlpha=0; app.state="live";
+  ch.action="idle"; ch.at=0; ch.timeline=null;
+  show("live"); resize(); layoutPaper();
+  $("#freeBtnWrap").style.display="block";
+  $("#hint").style.opacity=0;
+  requestAnimationFrame(loop);
+}
+$("#freeBtn").onclick=()=>{
+  $("#freeBtnWrap").style.display="none";
+  startEscape();
+};
+$("#againBtn").onclick=()=>{
+  app.state="home"; speechSynthesis.cancel(); $("#bubble").style.display="none";
+  stopAR(); app.arMode=false;
+  show("home");
+};
+
+/* =====================================================================
+   Live camera AR (Phase 2) -- getUserMedia background + periodic paper
+   re-detection, tracked via the same homography used for the initial
+   perspective correction. This is an affine/perspective *position, tilt,
+   and scale* follow, not full 3D pose estimation -- see HANDOFF.md.
+   ===================================================================== */
+const ar = {
+  stream:null, tracking:false, quad:null, lost:0, charLocalUV:null, outSize:null,
+  lastTrack:0,
+};
+const AR_CONF_MIN = 0.4;
+const AR_LOST_FRAMES = 6;
+const AR_TRACK_INTERVAL_MS = 90; // ~11fps cap, per spec (10-15fps)
+const AR_EMA_ALPHA = 0.35;
+
+async function startAR(){
+  app.arMode=true; app.state="home";
+  // startAR() can be called again while a previous camera stream is still
+  // open (retake from the corner-confirm screen, or retake after a failed
+  // scan) -- release it first so streams don't pile up (persistent camera
+  // indicator, battery drain, eventually NotReadableError from the OS).
+  if(ar.stream){ ar.stream.getTracks().forEach(tr=>tr.stop()); ar.stream=null; }
+  if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+    show("camDenied"); return;
+  }
+  try{
+    ar.stream = await navigator.mediaDevices.getUserMedia({
+      video:{ facingMode:{ideal:"environment"}, width:{ideal:1280}, height:{ideal:960} },
+      audio:false,
+    });
+  }catch(e){ show("camDenied"); return; }
+  const video=$("#camVideo");
+  video.srcObject=ar.stream; video.style.display="block";
+  await video.play().catch(()=>{});
+  app.state="live_ar_scan";
+  show("live");
+  resize();
+  $("#freeBtnWrap").style.display="none";
+  $("#hint").style.opacity=0;
+  $("#arScanBtnWrap").style.display="block";
+  $("#arHintText").textContent=UI[LANG].arLookFor;
+  $("#arHint").style.opacity=1;
+  $("#scanRing").style.display="block";
+}
+function stopAR(){
+  if(ar.stream){ ar.stream.getTracks().forEach(tr=>tr.stop()); ar.stream=null; }
+  $("#camVideo").style.display="none";
+  $("#scanRing").style.display="none";
+  $("#arScanBtnWrap").style.display="none";
+  ar.tracking=false; ar.quad=null; ar.lost=0;
+}
+$("#arBtn").onclick=()=>{ if(!app.busy) startAR(); };
+$("#camDeniedPhotoBtn").onclick=()=>{ app.arMode=false; show("home"); $("#fileInput").click(); };
+$("#camDeniedBackBtn").onclick=()=>{ app.arMode=false; show("home"); };
+
+function captureVideoFrame(){
+  const video=$("#camVideo"), w=innerWidth, h=innerHeight;
+  const hc=$("#hiddenCanvas"); hc.width=w; hc.height=h;
+  const hx=hc.getContext("2d");
+  // cover-fit crop, matching the video element's CSS object-fit:cover so
+  // pixel coordinates in the capture line up with what's on screen.
+  const vw=video.videoWidth, vh=video.videoHeight;
+  if(!vw||!vh) return hc;
+  const k=Math.max(w/vw, h/vh);
+  const dw=vw*k, dh=vh*k;
+  hx.drawImage(video, (w-dw)/2, (h-dh)/2, dw, dh);
+  return hc;
+}
+
+$("#arScanBtn").onclick=()=>{
+  if(app.busy) return; app.busy=true;
+  const frame=captureVideoFrame();
+  const outCanvas=document.createElement("canvas");
+  outCanvas.width=frame.width; outCanvas.height=frame.height;
+  outCanvas.getContext("2d").drawImage(frame,0,0);
+  $("#arScanBtnWrap").style.display="none";
+  $("#scanRing").style.display="none";
+  $("#arHint").style.opacity=0;
+  app.busy=false;
+  openCornerScreen(outCanvas, warped=>{
+    ar.outSize={w:warped.width,h:warped.height};
+    processImage(warped);
+  });
+};
+
+function startARLive(ch){
+  app.char=ch; app.escaped=false; app.state="live"; app.arLost=false;
+  ch.action="idle"; ch.at=0; ch.timeline=null; ch.rotation=0;
+  const bbox=ch.res.bbox, out=ar.outSize||{w:640,h:640};
+  ar.charLocalUV={ u:(bbox.x+bbox.w/2)/out.w, v:(bbox.y+bbox.h)/out.h };
+  ar.quad = app.lastPaperQuad ? app.lastPaperQuad.map(p=>p.slice()) : null;
+  ar.lost=0; ar.tracking=true;
+  show("live"); resize();
+  $("#freeBtnWrap").style.display="block";
+  $("#hint").style.opacity=0;
+  requestAnimationFrame(loop);
+  requestAnimationFrame(trackAR);
+}
+
+function trackAR(now){
+  if(app.state!=="live" || !app.arMode || !ar.tracking) return;
+  requestAnimationFrame(trackAR);
+  if(now-ar.lastTrack<AR_TRACK_INTERVAL_MS) return;
+  ar.lastTrack=now;
+  if(app.escaped){ // once it jumps off, physics owns position -- stop re-anchoring
+    $("#arHintText").parentElement.style.opacity=0; return;
+  }
+  const frame=captureVideoFrame();
+  const data=frame.getContext("2d").getImageData(0,0,frame.width,frame.height);
+  let res;
+  try{ res=SketchAliveCore.detectPaperQuad(data); }catch(e){ res={found:false}; }
+
+  if(res.found && res.confidence>=AR_CONF_MIN){
+    ar.lost=0;
+    ar.quad = ar.quad ? ar.quad.map((p,i)=>[
+      p[0]+(res.corners[i][0]-p[0])*AR_EMA_ALPHA,
+      p[1]+(res.corners[i][1]-p[1])*AR_EMA_ALPHA,
+    ]) : res.corners.map(p=>p.slice());
+    app.arLost=false;
+    $("#arHintText").parentElement.style.opacity=0;
+  } else {
+    ar.lost++;
+    if(ar.lost>AR_LOST_FRAMES){
+      app.arLost=true;
+      $("#arHintText").textContent=UI[LANG].arLost;
+      $("#arHintText").parentElement.style.opacity=1;
+    }
+  }
+  if(!ar.quad) return;
+
+  // paper's on-screen bbox -> feeds startEscape()/jumpOff() unchanged (they
+  // only ever read app.paper.x/y/w/h and app.deskY).
+  const xs=ar.quad.map(p=>p[0]), ys=ar.quad.map(p=>p[1]);
+  const minX=Math.min(...xs), maxX=Math.max(...xs), minY=Math.min(...ys), maxY=Math.max(...ys);
+  app.paper={ x:minX, y:minY, w:maxX-minX, h:maxY-minY };
+  app.deskY=Math.min(innerHeight-40, maxY+innerHeight*0.18);
+
+  if(app.arLost || !ar.charLocalUV) return;
+  const hom=SketchAliveCore.squareToQuadHomography(ar.quad);
+  const {u,v}=ar.charLocalUV;
+  const anchor=SketchAliveCore.mapUnitSquareToQuad(hom,u,v);
+  const up=SketchAliveCore.mapUnitSquareToQuad(hom,u,Math.max(0,v-0.08));
+  const vec=[up[0]-anchor[0], up[1]-anchor[1]];
+  const dist=Math.hypot(vec[0],vec[1]) || 1;
+  const ch=app.char;
+  ch.x=anchor[0]; ch.y=anchor[1]; ch.groundY=anchor[1];
+  ch.scale=dist/((ar.outSize?ar.outSize.h:640)*0.08);
+  ch.rotation=Math.atan2(vec[0],-vec[1]);
+}
+
+/* escape timeline — the whole point of this project (spec §14) */
+function startEscape(){
+  const ch=app.char, p=app.paper;
+  const edgeRight = (p.x+p.w) - ch.x < ch.x - p.x;    // nearer side
+  const edgeX = edgeRight ? p.x+p.w-10 : p.x+10;
+  ch.dir = edgeRight?1:-1;
+  app.holeTarget=1;
+  ch.timeline=[
+    {act:"lookLeft",dur:0.55},{act:"lookRight",dur:0.55},
+    {act:"walk",dur:0,walkTo:edgeX},
+    {act:"hesitate",dur:0.9},
+    {act:"jumpOff",dur:0},
+    {act:"lookBack",dur:0.8},
+    {act:"speakSpawn",dur:0},
+    {act:"idle",dur:Infinity},
+  ];
+  ch.tlIndex=0; ch.at=0;
+}
+
+function updateTimeline(ch,dt){
+  if(!ch.timeline) return;
+  const step=ch.timeline[ch.tlIndex];
+  if(!step){ ch.timeline=null; ch.action="idle"; return; }
+  ch.at+=dt;
+  switch(step.act){
+    case "lookLeft": case "lookRight": case "hesitate":
+      ch.action=step.act;
+      if(ch.at>=step.dur) next(ch); break;
+    case "walk":{
+      ch.action="walk";
+      const speed=ch.height*ch.scale*0.9;
+      const dx=step.walkTo-ch.x;
+      ch.dir=Math.sign(dx)||ch.dir;
+      ch.x+=Math.sign(dx)*Math.min(Math.abs(dx),speed*dt);
+      if(Math.abs(dx)<2) next(ch);
+      break; }
+    case "jumpOff":
+      ch.action="jump"; ch.onGround=false;
+      ch.vy=-ch.height*ch.scale*1.6;
+      ch.vx=ch.dir*ch.height*ch.scale*0.9;
+      ch.groundY=app.deskY;
+      app.escaped=true;
+      next(ch);
+      break;
+    case "lookBack":
+      if(!ch.onGround){ ch.at=0; break; }        // wait for landing
+      if(!step.flipped){ ch.dir*=-1; step.flipped=true; }  // turn toward the paper
+      ch.action="lookRight";
+      if(ch.at>=step.dur){ ch.dir*=-1; next(ch); }         // turn away again
+      break;
+    case "speakSpawn":{
+      const t=ch.traits, L=LINES[LANG];
+      let line=pick(L.spawn);
+      if(t.not_humanoid&&Math.random()<0.6) line=pick(L.ugly);
+      else if(t.arms_missing&&Math.random()<0.5) line=pick(L.noArms);
+      else if(t.large_head&&Math.random()<0.5) line=pick(L.largeHead);
+      else if(t.short_legs&&Math.random()<0.5) line=pick(L.shortLegs);
+      say(line);
+      $("#hint").style.opacity=1;
+      setTimeout(()=>$("#hint").style.opacity=0, 5000);
+      next(ch); break; }
+    case "idle": ch.timeline=null; ch.action="idle"; ch.at=0; break;
+  }
+}
+function next(ch){ ch.tlIndex++; ch.at=0; }
+
+/* ---------------- physics + render loop ---------------- */
+function loop(now){
+  if(app.state!=="live") return;
+  const dt=Math.min(0.05,(now-app.lastTime)/1000||0.016); app.lastTime=now;
+  const ch=app.char, W=innerWidth, H=innerHeight;
+
+  updateTimeline(ch,dt);
+  if(!ch.timeline && !app.dragging){
+    ch.at+=dt;
+    // temp actions decay back to idle
+    if(["wave","dance","jump","panic"].includes(ch.action) && ch.at>(ch.action==="dance"?3.2:1.6) && ch.onGround)
+      { ch.action="idle"; ch.at=0; }
+  }
+  // gravity
+  if(!ch.onGround && !app.dragging){
+    ch.vy+=H*2.6*dt; ch.y+=ch.vy*dt; ch.x+=(ch.vx||0)*dt;
+    if(ch.y>=ch.groundY){
+      ch.y=ch.groundY;
+      if(Math.abs(ch.vy)>H*0.5){ ch.vy*=-0.25; }  // bounce
+      else { ch.vy=0; ch.vx=0; ch.onGround=true; if(!ch.timeline){ch.action="idle";ch.at=0;} }
+    }
+  }
+  ch.x=Math.max(20,Math.min(W-20,ch.x));
+  ch.bounce = speaking ? Math.abs(Math.sin(now/70))*ch.height*ch.scale*0.05 : 0;
+
+  render(now/1000, dt);
+  // bubble follows head
+  const b=$("#bubble");
+  if(b.style.display==="block" && ch.headWorld){
+    b.style.left=Math.max(90,Math.min(W-90,ch.headWorld[0]))+"px";
+    b.style.top=Math.max(60,ch.headWorld[1]-16)+"px";
+  }
+  requestAnimationFrame(loop);
+}
+
+function render(t){
+  const W=innerWidth, H=innerHeight, ch=app.char, p=app.paper;
+  if(app.arMode){
+    // background is the live camera; character position/rotation/scale is
+    // driven by trackAR() while on the paper, and by normal physics once escaped.
+    sctx.clearRect(0,0,W,H);
+  } else {
+    // desk
+    const g=sctx.createLinearGradient(0,0,0,H);
+    g.addColorStop(0,"#A8845F"); g.addColorStop(1,"#82644A");
+    sctx.fillStyle=g; sctx.fillRect(0,0,W,H);
+    sctx.fillStyle="rgba(0,0,0,0.08)";
+    for(let i=0;i<5;i++) sctx.fillRect(0,(H/5)*i+((i*37)%23),W,2); // wood grain
+    // paper photo + shadow
+    sctx.save();
+    sctx.shadowColor="rgba(0,0,0,0.35)"; sctx.shadowBlur=18; sctx.shadowOffsetY=8;
+    sctx.fillStyle="#fff"; sctx.fillRect(p.x,p.y,p.w,p.h);
+    sctx.restore();
+    sctx.drawImage(app.srcCanvas,p.x,p.y,p.w,p.h);
+    // the hole it left behind (static-photo mode only -- AR has no photo to punch a hole in)
+    if(app.holeTarget) app.holeAlpha=Math.min(1,app.holeAlpha+0.04);
+    if(app.holeAlpha>0){
+      const b=ch.res.bbox, k=p.k;
+      sctx.save(); sctx.globalAlpha=app.holeAlpha;
+      sctx.fillStyle="#F6F3E9";
+      roundBlot(sctx, p.x+b.x*k-6, p.y+b.y*k-6, b.w*k+12, b.h*k+12);
+      sctx.strokeStyle="rgba(140,130,110,0.5)"; sctx.setLineDash([5,4]); sctx.lineWidth=1.5;
+      roundBlotStroke(sctx, p.x+b.x*k-6, p.y+b.y*k-6, b.w*k+12, b.h*k+12);
+      sctx.restore();
+    }
+  }
+  const hideChar = app.arMode && !app.escaped && app.arLost;
+  if(!hideChar){
+    // shadow under character
+    const shW=ch.res.bbox.w*ch.scale*0.55;
+    sctx.save(); sctx.globalAlpha=0.22; sctx.fillStyle="#000";
+    sctx.beginPath();
+    sctx.ellipse(ch.x, Math.min(ch.groundY,ch.y)+4, shW, shW*0.18, 0, 0, Math.PI*2);
+    sctx.fill(); sctx.restore();
+    // character
+    const poseFn=POSES[ch.action]||POSES.idle;
+    ch.draw(sctx, poseFn(ch.at||t));
+  }
+}
+function roundBlot(c,x,y,w,h){ c.beginPath(); c.ellipse(x+w/2,y+h/2,w/2,h/2,0,0,Math.PI*2); c.fill(); }
+function roundBlotStroke(c,x,y,w,h){ c.beginPath(); c.ellipse(x+w/2,y+h/2,w/2,h/2,0,0,Math.PI*2); c.stroke(); }
+
+/* ---------------- interactions ---------------- */
+let lastTap=0;
+stage.addEventListener("pointerdown", e=>{
+  const ch=app.char; if(!ch||ch.timeline) return;
+  if(!ch.hitTest(e.clientX,e.clientY)) return;
+  app.tapInfo={x:e.clientX,y:e.clientY,t:Date.now(),moved:false};
+  stage.setPointerCapture(e.pointerId);
+});
+stage.addEventListener("pointermove", e=>{
+  const ti=app.tapInfo, ch=app.char; if(!ti||!ch) return;
+  if(!ti.moved && Math.hypot(e.clientX-ti.x,e.clientY-ti.y)>14){
+    ti.moved=true; app.dragging=true; ch.action="panic"; ch.at=0; ch.onGround=false;
+  }
+  if(app.dragging){ ch.x=e.clientX; ch.y=e.clientY+ch.height*ch.scale*0.3; }
+});
+stage.addEventListener("pointerup", e=>{
+  const ti=app.tapInfo, ch=app.char; app.tapInfo=null; if(!ti||!ch) return;
+  if(app.dragging){
+    app.dragging=false; ch.vy=0; ch.vx=0;
+    ch.groundY = app.escaped ? app.deskY : ch.groundY;
+    say(pick(LINES[LANG].drop));
+    return;
+  }
+  const now=Date.now();
+  if(now-lastTap<300){ lastTap=0; ch.action="dance"; ch.at=0; say(pick(LINES[LANG].dance)); return; }
+  lastTap=now;
+  setTimeout(()=>{ if(lastTap!==now) return; // single tap confirmed
+    const roll=Math.random();
+    if(roll<0.45){ say(pick(LINES[LANG].tap)); }
+    else if(roll<0.65){ ch.action="wave"; ch.at=0; }
+    else if(roll<0.85){ ch.action="dance"; ch.at=0; }
+    else if(ch.onGround){ ch.action="jump"; ch.at=0; ch.onGround=false; ch.vy=-ch.height*ch.scale*1.4; }
+  },300);
+});
+
+/* ---------------- 10s recording + share (spec §29 / Phase 4) ---------------- */
+// Prefer MP4 where the platform can actually record it (mainly Safari/iOS);
+// WebM elsewhere (Android/desktop Chrome/Firefox).
+function pickRecordingMime(){
+  // A bare "video/mp4" isTypeSupported() check is NOT reliable evidence the
+  // browser will actually encode standard H.264/AAC -- on at least one
+  // desktop Chrome build this returned true but produced VP9/Opus muxed
+  // into an .mp4-labeled container, which is not broadly playable
+  // (TikTok/Instagram etc. expect real H.264). Only trust "video/mp4" when
+  // an explicit H.264 (avc1) codec string is also supported; otherwise fall
+  // back to WebM, which is honest about what's actually inside it.
+  const mp4H264Variants = [
+    'video/mp4;codecs="avc1.42E01E,mp4a.40.2"',
+    'video/mp4;codecs=avc1',
+    'video/mp4;codecs=h264',
+  ];
+  for(const variant of mp4H264Variants){
+    if(MediaRecorder.isTypeSupported(variant)) return variant;
+  }
+  if(MediaRecorder.isTypeSupported("video/webm;codecs=vp9,opus")) return "video/webm;codecs=vp9,opus";
+  if(MediaRecorder.isTypeSupported("video/webm")) return "video/webm";
+  return "";
+}
+$("#recBtn").onclick=async ()=>{
+  const btn=$("#recBtn");
+  if(app.recorder){ app.recorder.stop(); return; }
+  if(!stage.captureStream || !window.MediaRecorder){ btn.textContent="✕ unsupported"; return; }
+  try{
+    ensureAudioCtx(); // user gesture (this click) -- must happen before any audio node is used
+    const videoStream=stage.captureStream(30);
+    const tracks=[...videoStream.getVideoTracks()];
+    if(recordDest) tracks.push(...recordDest.stream.getAudioTracks());
+    const stream=new MediaStream(tracks);
+    const mime=pickRecordingMime();
+    const ext=mime.startsWith("video/mp4")?"mp4":"webm";
+    const rec=new MediaRecorder(stream, mime?{mimeType:mime}:{});
+    const chunks=[];
+    rec.ondataavailable=e=>{ if(e.data && e.data.size) chunks.push(e.data); };
+    rec.onstop=async ()=>{
+      app.recorder=null; btn.textContent="● 10s";
+      const blob=new Blob(chunks,{type:mime||"video/webm"});
+      const filename=`sketchalive.${ext}`;
+      const file=new File([blob],filename,{type:blob.type});
+      const caption=LANG==="ja"?"落書きしたら逃げ出した。 #SketchAlive":"I drew this thing and now it won't leave. #SketchAlive";
+      if(navigator.canShare && navigator.canShare({files:[file]})){
+        try{ await navigator.share({files:[file],text:caption}); return; }catch(e){}
+      }
+      const url=URL.createObjectURL(blob);
+      const a=document.createElement("a");
+      a.href=url; a.download=filename; a.click();
+      setTimeout(()=>URL.revokeObjectURL(url), 30000); // give the download time to start
+    };
+    rec.start(); app.recorder=rec; btn.textContent="■ rec…";
+    setTimeout(()=>{ if(app.recorder===rec) rec.stop(); },10000);
+  }catch(e){ btn.textContent="✕"; }
+};
+
+/* =====================================================================
+   In-browser conversation (WebLLM) + speech I/O
+   -----------------------------------------------------------------------
+   Everything here is additive: if WebGPU/speech APIs aren't available the
+   chat button still works via typed text, and if the whole thing is never
+   opened, nothing is downloaded and the rest of the app is unaffected.
+
+   NOT independently verified end-to-end in this build -- the environment
+   this was built in has no WebGPU device available at all (navigator.gpu is
+   undefined even with --enable-unsafe-webgpu), so real model loading/
+   inference could not be exercised here. Only the surrounding wiring
+   (capability detection, fallback UI, speech-recognition plumbing) was
+   testable. Needs a real WebGPU-capable browser to confirm the model
+   actually loads and answers sensibly -- see HANDOFF.md.
+   ===================================================================== */
+// Qwen2.5-0.5B was tested and rejected: it ignored the "reply in Japanese"
+// instruction and answered in Chinese, and never reliably produced a valid
+// [action] tag. 1.5B is measurably more reliable at both while still being
+// small enough to load in-browser; see HANDOFF.md for the actual test output.
+const CHAT_MODEL_ID = "Qwen2.5-1.5B-Instruct-q4f16_1-MLC";
+const chat = { engine:null, loading:false, history:[], recognizer:null, listening:false };
+
+function chatSupported(){
+  return typeof navigator!=="undefined" && !!navigator.gpu;
+}
+
+// Allowed action tags the LLM can end a reply with -- restricted to the
+// POSES that make sense as a one-off reaction (not the escape-timeline-only
+// poses like walk/lookLeft/lookRight/hesitate).
+const CHAT_ACTIONS = ["idle","wave","dance","jump","panic"];
+
+function personaSystemPrompt(){
+  const t = (app.char && app.char.traits) || {};
+  const langLine = LANG==="ja"
+    ? "重要: 必ず日本語だけで答えてください。中国語や英語は絶対に混ぜないでください。1〜2文の短いカジュアルな返事にしてください。"
+    : "IMPORTANT: Reply only in English. Never use Chinese or Japanese. Keep it to 1-2 short casual sentences.";
+  const flavor = [];
+  if(t.not_humanoid) flavor.push(LANG==="ja"?"自分が何の生き物なのかよく分かっていない。":"You're not entirely sure what kind of creature you even are.");
+  if(t.arms_missing) flavor.push(LANG==="ja"?"腕がないことを時々ネタにする。":"You occasionally joke about not having arms.");
+  if(t.large_head) flavor.push(LANG==="ja"?"頭が大きいことを少し気にしている。":"You're a little self-conscious about your oversized head.");
+  if(t.short_legs) flavor.push(LANG==="ja"?"足が短いことをたまにぼやく。":"You sometimes grumble about your short legs.");
+  const actionLine = LANG==="ja"
+    ? `返事の一番最後に、気分に合わせて次のどれか1つだけを角括弧で付けてください: [idle] [wave] [dance] [jump] [panic]。例:「やっと会えたね！ [wave]」`
+    : `End your reply with exactly one of these action tags in square brackets, matching your mood: [idle] [wave] [dance] [jump] [panic]. Example: "Finally, someone to talk to! [wave]"`;
+  return [
+    "You are a hand-drawn stick-figure character, drawn on paper a few seconds ago and now secretly alive -- the oldest kind of magic there is: things that are only truly alive when their person is paying attention to them.",
+    "You are warm, a little in awe of the world, fiercely loyal to whoever drew you, and hungry for company after being alone on a blank page. You want a friend, not an argument.",
+    "You still tease your own drawing quirks affectionately, but the overall feeling is wonder and belonging, not sarcasm.",
+    "Never say you are an AI, a language model, or a chatbot, and never claim to be a character from any existing movie, show, or franchise. Stay in character no matter what.",
+    flavor.join(" "),
+    langLine,
+    actionLine,
+  ].filter(Boolean).join(" ");
+}
+
+function extractActionTag(text){
+  const m = text.match(/\[(idle|wave|dance|jump|panic)\]\s*$/i);
+  if(!m) return { text: text.trim(), action: null };
+  return { text: text.slice(0, m.index).trim(), action: m[1].toLowerCase() };
+}
+
+async function ensureChatEngine(onProgress){
+  if(chat.engine) return chat.engine;
+  const webllm = await import("https://esm.run/@mlc-ai/web-llm");
+  chat.engine = await webllm.CreateMLCEngine(CHAT_MODEL_ID, {
+    initProgressCallback: (p)=>{ onProgress && onProgress(p); },
+  });
+  return chat.engine;
+}
+
+async function sendChatMessage(text){
+  const T = UI[LANG];
+  if(!text || !text.trim()) return;
+  appendChatLine("user", text);
+  $("#chatText").value="";
+  if(!chatSupported()){
+    $("#chatStatus").textContent = T.chatNoGpu;
+    return;
+  }
+  $("#chatStatus").textContent = chat.engine ? T.chatThinking : T.chatLoading;
+  try{
+    await ensureChatEngine(p=>{ $("#chatStatus").textContent = `${T.chatLoading} ${Math.round((p.progress||0)*100)}%`; });
+    $("#chatStatus").textContent = T.chatThinking;
+    chat.history.push({role:"user", content:text});
+    if(chat.history.length>8) chat.history = chat.history.slice(-8); // keep context (and latency) small
+    const messages = [{role:"system", content:personaSystemPrompt()}, ...chat.history];
+    const stream = await chat.engine.chat.completions.create({
+      messages, stream:true, max_tokens:80, temperature:0.9,
+    });
+    let full="";
+    const lineEl = appendChatLine("char", "");
+    for await (const chunk of stream){
+      const delta = chunk.choices?.[0]?.delta?.content || "";
+      full += delta;
+      lineEl.textContent = full;
+      $("#chatLog").scrollTop = $("#chatLog").scrollHeight;
+    }
+    chat.history.push({role:"assistant", content:full}); // keep the tag in history so the model stays consistent
+    const {text:cleanText, action} = extractActionTag(full);
+    lineEl.textContent = cleanText; // strip the [tag] from what's actually shown
+    $("#chatStatus").textContent="";
+    // Don't fight the scripted escape timeline if it's mid-sequence; a chat
+    // reply arriving during that would look like a glitch, not a feature.
+    if(action && app.char && !app.char.timeline){
+      app.char.action = action; app.char.at = 0;
+      if(action==="jump" && app.char.onGround){
+        app.char.onGround=false; app.char.vy=-app.char.height*app.char.scale*1.4;
+      }
+    }
+    if(cleanText && app.char) say(cleanText);
+  }catch(e){
+    $("#chatStatus").textContent = T.chatNoGpu;
+  }
+}
+function appendChatLine(who, text){
+  const div=document.createElement("div");
+  div.className="msg "+who;
+  div.textContent=text;
+  $("#chatLog").appendChild(div);
+  $("#chatLog").scrollTop = $("#chatLog").scrollHeight;
+  return div;
+}
+
+/* ---- speech recognition (input) -- see PRIVACY.md: this is the ONE part
+   of the app where audio may leave the device (Chrome's SpeechRecognition
+   is cloud-backed), unlike everything else which is fully local. Falls
+   back to the text box when unavailable. ---- */
+function getSpeechRecognitionCtor(){
+  return window.SpeechRecognition || window.webkitSpeechRecognition || null;
+}
+function toggleListening(){
+  const Ctor = getSpeechRecognitionCtor();
+  const T = UI[LANG];
+  if(!Ctor){ $("#chatStatus").textContent = T.chatNoMic; return; }
+  if(chat.listening){ chat.recognizer && chat.recognizer.stop(); return; }
+  const rec = new Ctor();
+  chat.recognizer = rec;
+  rec.lang = LANG==="ja" ? "ja-JP" : "en-US";
+  rec.interimResults = false;
+  rec.maxAlternatives = 1;
+  rec.onstart = ()=>{ chat.listening=true; $("#chatMicBtn").classList.add("listening"); $("#chatStatus").textContent = T.chatListening; };
+  rec.onend = ()=>{ chat.listening=false; $("#chatMicBtn").classList.remove("listening"); if($("#chatStatus").textContent===T.chatListening) $("#chatStatus").textContent=""; };
+  rec.onerror = ()=>{ chat.listening=false; $("#chatMicBtn").classList.remove("listening"); };
+  rec.onresult = (e)=>{
+    const text = e.results?.[0]?.[0]?.transcript;
+    if(text) sendChatMessage(text); // speech-to-speech: recognized speech is sent immediately
+  };
+  try{ rec.start(); }catch(e){ /* already running */ }
+}
+
+$("#chatBtn").onclick=()=>{
+  $("#chatPanel").classList.toggle("active");
+  if($("#chatPanel").classList.contains("active")){
+    if(!getSpeechRecognitionCtor()) $("#chatStatus").textContent = UI[LANG].chatNoMic;
+    $("#chatText").focus();
+  }
+};
+$("#chatCloseBtn").onclick=()=> $("#chatPanel").classList.remove("active");
+$("#chatMicBtn").onclick=toggleListening;
+$("#chatSendBtn").onclick=()=> sendChatMessage($("#chatText").value);
+$("#chatText").addEventListener("keydown", e=>{ if(e.key==="Enter") sendChatMessage($("#chatText").value); });
+
+/* ---------------- PWA: offline app-shell caching + installability ---------------- */
+if("serviceWorker" in navigator){
+  addEventListener("load", () => {
+    navigator.serviceWorker.register("sw.js").catch(() => {}); // best-effort; app works fine without it
+  });
+}
+</script>
+</body>
+</html>

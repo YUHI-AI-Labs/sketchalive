@@ -1,0 +1,8 @@
+.DS_Store
+*.log
+/screenshots/
+
+# auto-symlinked by `streamlit run` (points into the local uv/pip cache,
+# machine-specific and not part of the project)
+/.agents/
+/.claude/
