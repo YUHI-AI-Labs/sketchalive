@@ -483,16 +483,32 @@
     J.elbow_right = mid(J.shoulder_right, J.hand_right);
 
     // Legs: extreme bottom points on each side of the root column.
+    // Guard against misattributing ink that isn't a leg at all: with no legs
+    // drawn, the lowest ink in the bottom band is often just the arm tips
+    // (if the arms droop) or the torso's own tail end (if it runs to the
+    // bbox bottom) -- both would otherwise get mistaken for feet. Reject a
+    // candidate that's really just the already-found hand, or that lands on
+    // (near) the root column itself (torso tail, not a leg to either side).
     const legBand = [0.72, 1.0];
     let footL = null, footR = null;
     {
       const y0 = by + Math.floor(bh * legBand[0]);
+      const rejectRadius = Math.max(bw, bh) * 0.11;
+      const nearHand = (x, y) =>
+        (leftHand && dist([x, y], [leftHand.x, leftHand.y]) < rejectRadius) ||
+        (rightHand && dist([x, y], [rightHand.x, rightHand.y]) < rejectRadius);
       for (let y = y0; y < by + bh; y++) {
         for (let x = bx; x < bx + bw; x++) {
           if (!mask[y * w + x]) continue;
+          if (nearHand(x, y)) continue;
           if (x <= J.root[0]) { if (!footL || y > footL.y || (y === footL.y && x < footL.x)) footL = { x, y }; }
           else { if (!footR || y > footR.y || (y === footR.y && x > footR.x)) footR = { x, y }; }
         }
+      }
+      // Both "feet" landing on (near) the root column means we found the
+      // torso's own bottom, not two separate legs -- discard both.
+      if (footL && footR && Math.abs(footL.x - J.root[0]) < bw * 0.03 && Math.abs(footR.x - J.root[0]) < bw * 0.03) {
+        footL = null; footR = null;
       }
     }
     if (!footL && footR) footL = { x: 2 * J.root[0] - footR.x, y: footR.y };

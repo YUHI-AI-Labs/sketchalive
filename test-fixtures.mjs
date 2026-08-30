@@ -55,8 +55,10 @@ function stickFigure(img, cx, cy0, scale, opts) {
   drawLine(img, cx, cy0 + 60 * s, cx, cy0 + 170 * s, 4, rgb, rng);
   if (!opts.oneArm) drawLine(img, cx, cy0 + 80 * s, cx - 65 * s, cy0 + 130 * s, 4, rgb, rng);
   drawLine(img, cx, cy0 + 80 * s, cx + 65 * s, cy0 + 130 * s, 4, rgb, rng);
-  drawLine(img, cx, cy0 + 170 * s, cx - 55 * s, cy0 + 260 * s, 4, rgb, rng);
-  drawLine(img, cx, cy0 + 170 * s, cx + 55 * s, cy0 + 260 * s, 4, rgb, rng);
+  if (!opts.noLegs) {
+    drawLine(img, cx, cy0 + 170 * s, cx - 55 * s, cy0 + 260 * s, 4, rgb, rng);
+    drawLine(img, cx, cy0 + 170 * s, cx + 55 * s, cy0 + 260 * s, 4, rgb, rng);
+  }
 }
 
 /* 1. blank paper + black pen (baseline sanity, high thick lines) */
@@ -177,6 +179,18 @@ function stickFigure(img, cx, cy0, scale, opts) {
   drawLine(img, 220, 300, 220, 350, 3, null, rng);
   const r = core.extractCharacter(img);
   assert(r.ok, "non-humanoid doodle (a house) still rigs without crashing (spec: never hard-fail)");
+}
+
+/* 10. no legs drawn at all -- the torso's own tail end (or, in this pose,
+   ink near the bbox bottom) must not get misattributed as two feet. */
+{
+  const rng = core.mulberry32(10);
+  const img = makeImage(400, 400);
+  stickFigure(img, 200, 20, 1, { rng, noLegs: true });
+  const r = core.extractCharacter(img);
+  assert(r.ok, "legless figure still extracts without crashing");
+  assert(r.traits.legs_missing, "legless figure is correctly flagged legs_missing (not misdetected as having feet)");
+  assert(r.mesh.vertices.length > 0 && r.mesh.triangles.length > 0, "legless figure still gets a non-empty mesh (renders/animates, just no leg geometry)");
 }
 
 console.log(failures === 0 ? "\nALL PASS" : `\n${failures} FAILURES`);

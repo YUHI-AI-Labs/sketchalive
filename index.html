@@ -321,6 +321,7 @@ const LINES = {
     dance:["いいよ、一曲だけね。"],
     largeHead:["首が痛い。"], shortLegs:["なんで足が4ピクセルなの？"],
     noArms:["いいね。腕なし。"], lowConf:["自分でも自分が何なのか分からない。"],
+    noLegs:["足？ いらない子だった。","浮いてる感じ、悪くないよ。"],
     ugly:["自然は過ちを犯した。"],
   },
   en:{
@@ -330,6 +331,7 @@ const LINES = {
     dance:["Fine. One dance."],
     largeHead:["My neck hurts."], shortLegs:["Why are my legs 4 pixels long?"],
     noArms:["Cool. No arms."], lowConf:["I don't know what I am either."],
+    noLegs:["Legs? Overrated.","Floating is basically walking, just fancier."],
     ugly:["Nature has made a mistake."],
   },
 };
@@ -839,6 +841,7 @@ function showFound(result, srcCanvas, err){
   if(t.not_humanoid){ sub=LINES[LANG].ugly[0]; }
   else if(result.confidence<0.5){ line=T.found; sub=LINES[LANG].lowConf[0]; }
   else if(t.arms_missing){ sub=LINES[LANG].noArms[0]; }
+  else if(t.legs_missing){ sub=LINES[LANG].noLegs[0]; }
   else if(t.large_head){ sub=LINES[LANG].largeHead[0]; }
   else if(t.short_legs){ sub=LINES[LANG].shortLegs[0]; }
   $("#foundLine").textContent=line;
@@ -1152,6 +1155,7 @@ function updateTimeline(ch,dt){
       let line=pick(L.spawn);
       if(t.not_humanoid&&Math.random()<0.6) line=pick(L.ugly);
       else if(t.arms_missing&&Math.random()<0.5) line=pick(L.noArms);
+      else if(t.legs_missing&&Math.random()<0.5) line=pick(L.noLegs);
       else if(t.large_head&&Math.random()<0.5) line=pick(L.largeHead);
       else if(t.short_legs&&Math.random()<0.5) line=pick(L.shortLegs);
       say(line);
