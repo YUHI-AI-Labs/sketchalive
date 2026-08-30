@@ -166,6 +166,13 @@
     background:rgba(252,252,248,.97);border:2.5px solid var(--ink);border-radius:16px;
     padding:10px;max-height:46vh;box-shadow:2px 4px 0 rgba(38,38,46,.2)}
   #chatPanel.active{display:flex;flex-direction:column;gap:6px}
+  #crashNotice{display:none;position:relative;background:#fef3e0;border:1.5px solid #c98a1f;
+    border-radius:8px;padding:10px 30px 10px 10px;margin-bottom:18px;font-size:12px;
+    color:#5c3a08;text-align:left;line-height:1.5}
+  #crashNotice.show{display:block}
+  #crashNotice p{margin:0}
+  #crashNoticeCloseBtn{position:absolute;top:2px;right:2px;padding:4px 8px;font-size:12px;
+    background:none;border:none;box-shadow:none;color:#5c3a08}
   #chatNoGpuBanner{display:none;background:#fef3e0;border:1.5px solid #c98a1f;border-radius:8px;
     padding:8px 10px;margin-bottom:6px;font-size:13px;color:#5c3a08}
   #chatNoGpuBanner strong{display:block;margin-bottom:2px}
@@ -193,6 +200,10 @@
 
 <!-- ================= HOME ================= -->
 <div class="screen active" id="home">
+  <div id="crashNotice">
+    <p data-i18n="crashNoticeText">前回、会話モデルの読み込み中にページが終了した形跡があります（クラッシュの可能性）。この端末では会話機能が不安定かもしれません。</p>
+    <button class="ghost" id="crashNoticeCloseBtn">✕</button>
+  </div>
   <h1>SketchAlive</h1>
   <p class="tagline">Draw it. Scan it. Watch it escape.</p>
   <div style="height:34px"></div>
@@ -345,7 +356,8 @@ const UI = {
        chatListening:"聞いています…", chatThinking:"考え中…", chatBtnLabel:"会話する",
        chatNoGpuTitle:"会話機能は使えません", chatNoGpuDetail:"この端末・ブラウザはWebGPUに対応していません。新しめのAndroid ChromeまたはPCのChrome/Edgeで試してください。",
        chatStartDetail:"会話機能を使うには、初回だけモデル（数百MB〜1GB）をダウンロードします。端末によっては読み込み中に不安定になる場合があります。",
-       chatStartBtn:"ダウンロードして会話を始める" },
+       chatStartBtn:"ダウンロードして会話を始める",
+       crashNoticeText:"前回、会話モデルの読み込み中にページが終了した形跡があります（クラッシュの可能性）。この端末では会話機能が不安定かもしれません。" },
   en:{ drawPrompt:"Draw something with arms and legs.", scan:"Scan my doodle",
        noCam:"No camera? Try a practice doodle:", again:"New doodle",
        hint:"Tap to talk · drag to carry · double-tap to dance",
@@ -364,7 +376,8 @@ const UI = {
        chatListening:"Listening...", chatThinking:"Thinking...", chatBtnLabel:"Talk",
        chatNoGpuTitle:"Chat isn't available", chatNoGpuDetail:"This device/browser doesn't support WebGPU. Try a recent Chrome/Edge on desktop or Android.",
        chatStartDetail:"Chat needs a one-time model download (hundreds of MB to ~1GB). On some devices this can make the browser unstable while loading.",
-       chatStartBtn:"Download & start chatting" },
+       chatStartBtn:"Download & start chatting",
+       crashNoticeText:"Last time, the page seems to have ended while the chat model was loading (possibly a crash). Chat may be unstable on this device." },
 };
 const LINES = {
   ja:{
@@ -400,6 +413,20 @@ function applyLang(){
 $("#langBtn").onclick = ()=>{ LANG = LANG==="ja"?"en":"ja"; applyLang(); };
 applyLang();
 const pick = arr => arr[(Math.random()*arr.length)|0];
+
+// Crash breadcrumb check (see chatStartBtn's onclick): a leftover
+// "sa_chat_load_started" key means a previous model-load attempt never
+// cleanly finished or failed -- the page went away mid-load, consistent
+// with a crash. Surface that concretely instead of relying on the user
+// being able to describe "it reloaded" precisely.
+try{
+  const started = localStorage.getItem("sa_chat_load_started");
+  if(started){
+    $("#crashNotice").classList.add("show");
+    localStorage.removeItem("sa_chat_load_started");
+  }
+}catch(e){}
+$("#crashNoticeCloseBtn").onclick = ()=> $("#crashNotice").classList.remove("show");
 
 /* ---------------- speech ---------------- */
 let speaking = false;
@@ -1594,6 +1621,12 @@ $("#chatStartBtn").onclick=()=>{
   if(chat.loading) return;
   chat.loading = true;
   $("#chatStartBtn").disabled = true;
+  // Crash breadcrumb: if the tab dies mid-load (OOM kill or otherwise),
+  // this key is left behind in localStorage with nothing to clear it --
+  // the NEXT page load notices that and can tell the user (and us) that
+  // the previous load attempt likely crashed, instead of relying on
+  // someone being able to describe "it reloaded" precisely after the fact.
+  try{ localStorage.setItem("sa_chat_load_started", String(Date.now())); }catch(e){}
   ensureChatEngine(p=>{ $("#chatStatus").textContent = `${UI[LANG].chatLoading} ${Math.round((p.progress||0)*100)}%`; })
     .then(()=>{
       $("#chatStatus").textContent="";
@@ -1602,7 +1635,10 @@ $("#chatStartBtn").onclick=()=>{
       $("#chatText").focus();
     })
     .catch(()=>{ $("#chatStatus").textContent = UI[LANG].chatNoGpu; })
-    .finally(()=>{ chat.loading=false; $("#chatStartBtn").disabled=false; });
+    .finally(()=>{
+      chat.loading=false; $("#chatStartBtn").disabled=false;
+      try{ localStorage.removeItem("sa_chat_load_started"); }catch(e){}
+    });
 };
 $("#chatCloseBtn").onclick=()=> $("#chatPanel").classList.remove("active");
 $("#chatMicBtn").onclick=toggleListening;
