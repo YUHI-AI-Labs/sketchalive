@@ -333,7 +333,7 @@ const UI = {
        chatLoading:"会話モデルを読み込み中…（初回のみ、数十MB〜）",
        chatNoGpu:"この端末/ブラウザは会話機能に対応していません（WebGPUが必要）。",
        chatNoMic:"この端末では音声入力に対応していません。テキストで話しかけてください。",
-       chatListening:"聞いています…", chatThinking:"考え中…", chatBtnLabel:"💬 会話",
+       chatListening:"聞いています…", chatThinking:"考え中…", chatBtnLabel:"会話する",
        chatNoGpuTitle:"会話機能は使えません", chatNoGpuDetail:"この端末・ブラウザはWebGPUに対応していません。新しめのAndroid ChromeまたはPCのChrome/Edgeで試してください。" },
   en:{ drawPrompt:"Draw something with arms and legs.", scan:"Scan my doodle",
        noCam:"No camera? Try a practice doodle:", again:"New doodle",
@@ -350,7 +350,7 @@ const UI = {
        chatLoading:"Loading the chat model... (first time only, tens of MB+)",
        chatNoGpu:"Chat isn't supported on this device/browser (needs WebGPU).",
        chatNoMic:"Voice input isn't supported here. Type instead.",
-       chatListening:"Listening...", chatThinking:"Thinking..." },
+       chatListening:"Listening...", chatThinking:"Thinking...", chatBtnLabel:"Talk" },
 };
 const LINES = {
   ja:{
@@ -1587,18 +1587,31 @@ if("serviceWorker" in navigator){
 /* Preload the chat model as early as possible (page load, not "chat panel
  * opened") -- the download is the slow part, and starting it the moment the
  * page is WebGPU-capable means it's often ready by the time someone actually
- * wants to talk. Skipped entirely if the browser says the user has Data
- * Saver on, since this is a real, un-asked-for download otherwise.
+ * wants to talk.
+ *
+ * SAFETY: a ~1.5B-param model plus WebGPU buffers is a real, GB-scale
+ * memory commitment. Auto-downloading it in the background on a phone
+ * with limited RAM risks the browser tab crashing outright -- not a JS
+ * error catchable by try/catch, an actual OOM kill. Only auto-preload when
+ * navigator.deviceMemory positively reports enough headroom (>=4GB); most
+ * mobile Safari has no such API at all, so this conservatively does NOT
+ * auto-preload there, or on any device that reports less. Those cases fall
+ * back to loading on-demand when the chat panel is actually opened (see
+ * chatBtn's onclick), which at least ties the download to explicit intent
+ * instead of happening silently for everyone regardless of device.
  *
  * A small persistent badge (visible across every screen, not just inside
- * the chat panel) shows this progress while you're drawing/scanning, so
+ * the chat panel) shows preload progress while you're drawing/scanning, so
  * "is it ready yet" has a visible answer instead of just hoping. */
-if(chatSupported() && !(navigator.connection && navigator.connection.saveData)){
+const safeToAutoPreload = chatSupported()
+  && !(navigator.connection && navigator.connection.saveData)
+  && (navigator.deviceMemory === undefined ? false : navigator.deviceMemory >= 4);
+if(safeToAutoPreload){
   const badge = $("#chatPreloadBadge");
-  badge.textContent = "🧠 " + UI[LANG].chatLoading; badge.classList.add("show");
+  badge.textContent = UI[LANG].chatLoading; badge.classList.add("show");
   ensureChatEngine(p=>{
     const pct = Math.round((p.progress||0)*100);
-    badge.textContent = `🧠 ${UI[LANG].chatLoading} ${pct}%`;
+    badge.textContent = `${UI[LANG].chatLoading} ${pct}%`;
   }).then(()=>{ badge.classList.remove("show"); }).catch(()=>{ badge.classList.remove("show"); });
 }
 </script>
