@@ -28,7 +28,16 @@
   }
   *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
   html,body{height:100%;overflow:hidden;overscroll-behavior:none}
+  /* This is a phone-app UI, not a webpage -- on a wide (desktop) viewport,
+     pin it to a phone-shaped frame instead of stretching edge-to-edge, the
+     same fixed-frame treatment as the Streamlit embed. On an actual phone
+     viewport (<=480px wide) this is a no-op: the frame just equals the
+     screen. `transform` turns body into the containing block for every
+     position:fixed descendant (.screen, #hud, the chat panel, etc.), so
+     they all stay confined to the frame instead of the true viewport. */
+  html{background:#26262E}
   body{
+    max-width:480px;margin:0 auto;position:relative;transform:translateZ(0);
     font-family:'Yusei Magic', 'Hiragino Maru Gothic ProN', system-ui, sans-serif;
     color:var(--ink);
     background:
@@ -293,6 +302,14 @@
    ===================================================================== */
 
 const $ = s => document.querySelector(s);
+// The app renders inside a fixed phone-shaped frame (body{max-width:480px}),
+// not necessarily the true browser window -- on a wide/desktop viewport
+// those differ. Every layout calc that used to read innerWidth/innerHeight
+// must use the FRAME's size instead, or things get positioned/sized as if
+// the frame were the full (wider) window. On an actual phone viewport
+// (<=480px) body fills the window anyway, so this is a no-op there.
+const fw = () => document.body.clientWidth;
+const fh = () => document.body.clientHeight;
 const screens = { home: $("#home"), loading: $("#loading"), corners: $("#corners"),
   found: $("#found"), live: $("#live"), camDenied: $("#camDenied") };
 function show(name){ Object.values(screens).forEach(s=>s.classList.remove("active")); screens[name].classList.add("active"); }
@@ -631,8 +648,8 @@ const stage = $("#stage");
 const sctx = stage.getContext("2d");
 let DPR = Math.min(2, window.devicePixelRatio||1);
 function resize(){
-  stage.width = innerWidth*DPR; stage.height = innerHeight*DPR;
-  stage.style.width = innerWidth+"px"; stage.style.height = innerHeight+"px";
+  stage.width = fw()*DPR; stage.height = fh()*DPR;
+  stage.style.width = fw()+"px"; stage.style.height = fh()+"px";
   sctx.setTransform(DPR,0,0,DPR,0,0);
   if(app.state==="live" && !app.arMode) layoutPaper();
   if(app.state==="corners") layoutCornerHandles();
@@ -934,7 +951,7 @@ function renderDebugPanel(){
 
 /* ---------------- live scene ---------------- */
 function layoutPaper(){
-  const W=innerWidth, H=innerHeight;
+  const W=fw(), H=fh();
   const src=app.srcCanvas;
   const maxW=W*0.82, maxH=H*0.55;
   const k=Math.min(maxW/src.width, maxH/src.height);
@@ -1028,7 +1045,7 @@ $("#camDeniedPhotoBtn").onclick=()=>{ app.arMode=false; show("home"); $("#fileIn
 $("#camDeniedBackBtn").onclick=()=>{ app.arMode=false; show("home"); };
 
 function captureVideoFrame(){
-  const video=$("#camVideo"), w=innerWidth, h=innerHeight;
+  const video=$("#camVideo"), w=fw(), h=fh();
   const hc=$("#hiddenCanvas"); hc.width=w; hc.height=h;
   const hx=hc.getContext("2d");
   // cover-fit crop, matching the video element's CSS object-fit:cover so
@@ -1107,7 +1124,7 @@ function trackAR(now){
   const xs=ar.quad.map(p=>p[0]), ys=ar.quad.map(p=>p[1]);
   const minX=Math.min(...xs), maxX=Math.max(...xs), minY=Math.min(...ys), maxY=Math.max(...ys);
   app.paper={ x:minX, y:minY, w:maxX-minX, h:maxY-minY };
-  app.deskY=Math.min(innerHeight-40, maxY+innerHeight*0.18);
+  app.deskY=Math.min(fh()-40, maxY+fh()*0.18);
 
   if(app.arLost || !ar.charLocalUV) return;
   const hom=SketchAliveCore.squareToQuadHomography(ar.quad);
@@ -1193,7 +1210,7 @@ function next(ch){ ch.tlIndex++; ch.at=0; }
 function loop(now){
   if(app.state!=="live") return;
   const dt=Math.min(0.05,(now-app.lastTime)/1000||0.016); app.lastTime=now;
-  const ch=app.char, W=innerWidth, H=innerHeight;
+  const ch=app.char, W=fw(), H=fh();
 
   updateTimeline(ch,dt);
   if(!ch.timeline && !app.dragging){
@@ -1225,7 +1242,7 @@ function loop(now){
 }
 
 function render(t){
-  const W=innerWidth, H=innerHeight, ch=app.char, p=app.paper;
+  const W=fw(), H=fh(), ch=app.char, p=app.paper;
   if(app.arMode){
     // background is the live camera; character position/rotation/scale is
     // driven by trackAR() while on the paper, and by normal physics once escaped.
@@ -1273,18 +1290,29 @@ function roundBlotStroke(c,x,y,w,h){ c.beginPath(); c.ellipse(x+w/2,y+h/2,w/2,h/
 
 /* ---------------- interactions ---------------- */
 let lastTap=0;
+// Character/UI coordinates (ch.x, ch.y, ...) all live in FRAME space
+// (0..fw(), 0..fh()). Pointer events report VIEWPORT space, which only
+// matches the frame when the frame fills the window edge-to-edge (mobile);
+// on a wide/desktop viewport the frame is centered with letterboxing, so
+// raw clientX/clientY must be corrected by the stage's own offset.
+function framePoint(e){
+  const r = stage.getBoundingClientRect();
+  return { x: e.clientX - r.left, y: e.clientY - r.top };
+}
 stage.addEventListener("pointerdown", e=>{
   const ch=app.char; if(!ch||ch.timeline) return;
-  if(!ch.hitTest(e.clientX,e.clientY)) return;
-  app.tapInfo={x:e.clientX,y:e.clientY,t:Date.now(),moved:false};
+  const p=framePoint(e);
+  if(!ch.hitTest(p.x,p.y)) return;
+  app.tapInfo={x:p.x,y:p.y,t:Date.now(),moved:false};
   stage.setPointerCapture(e.pointerId);
 });
 stage.addEventListener("pointermove", e=>{
   const ti=app.tapInfo, ch=app.char; if(!ti||!ch) return;
-  if(!ti.moved && Math.hypot(e.clientX-ti.x,e.clientY-ti.y)>14){
+  const p=framePoint(e);
+  if(!ti.moved && Math.hypot(p.x-ti.x,p.y-ti.y)>14){
     ti.moved=true; app.dragging=true; ch.action="panic"; ch.at=0; ch.onGround=false;
   }
-  if(app.dragging){ ch.x=e.clientX; ch.y=e.clientY+ch.height*ch.scale*0.3; }
+  if(app.dragging){ ch.x=p.x; ch.y=p.y+ch.height*ch.scale*0.3; }
 });
 stage.addEventListener("pointerup", e=>{
   const ti=app.tapInfo, ch=app.char; app.tapInfo=null; if(!ti||!ch) return;
