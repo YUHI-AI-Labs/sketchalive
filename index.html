@@ -159,6 +159,21 @@
     pointer-events:none;z-index:4}
   #camDenied{padding:32px;max-width:420px}
 
+  /* ---- voice picker (free fix for "the voice sounds off": let the user
+     pick from whichever voices this device actually has installed) ---- */
+  #voicePanel{display:none;position:fixed;inset:0;z-index:70;
+    background:rgba(20,20,24,.55);align-items:center;justify-content:center}
+  #voicePanel.show{display:flex}
+  #voicePanelInner{background:rgba(252,252,248,.98);border:2.5px solid var(--ink);
+    border-radius:16px;padding:14px;width:min(88vw,360px);max-height:70vh;
+    display:flex;flex-direction:column;gap:8px;box-shadow:2px 4px 0 rgba(38,38,46,.2)}
+  #voiceList{overflow-y:auto;display:flex;flex-direction:column;gap:4px;max-height:50vh}
+  .voiceRow{display:flex;align-items:center;gap:6px;font-size:13px;
+    border:1.5px solid var(--ink);border-radius:10px;padding:6px 8px;background:#fff}
+  .voiceRow.selected{background:#ffe9a8}
+  .voiceRow span{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .voiceRow button{padding:3px 8px;font-size:12px}
+
   /* ---- chat panel (in-browser LLM conversation) ---- */
   #hud button#chatBtn{font-size:18px;padding:8px 12px}
   #chatPanel{display:none;position:absolute;left:10px;right:10px;
@@ -218,6 +233,15 @@
     <button data-preset="disaster">Absolute Disaster</button>
   </div>
   <button class="ghost" id="langBtn" style="margin-top:18px;font-size:13px">EN / 日本語</button>
+  <button class="ghost" id="voiceBtn" style="margin-top:8px;font-size:13px" data-i18n="voiceBtn">声を選ぶ</button>
+</div>
+
+<div id="voicePanel">
+  <div id="voicePanelInner">
+    <strong data-i18n="voicePanelTitle">声を選ぶ</strong>
+    <div id="voiceList"></div>
+    <button class="ghost" id="voiceCloseBtn">✕</button>
+  </div>
 </div>
 
 <!-- ================= LOADING ================= -->
@@ -359,7 +383,9 @@ const UI = {
        chatStartDetail:"会話機能を使うには、初回だけモデル（数百MB〜1GB）をダウンロードします。端末によっては読み込み中に不安定になる場合があります。",
        chatStartBtn:"ダウンロードして会話を始める",
        crashNoticeText:"前回、会話モデルの読み込み中にページが終了した形跡があります（クラッシュの可能性）。この端末では会話機能が不安定かもしれません。",
-       recordHint:"今の、録っておく？（●10sボタン）" },
+       recordHint:"今の、録っておく？（●10sボタン）",
+       voiceBtn:"声を選ぶ", voicePanelTitle:"声を選ぶ", voiceAuto:"自動（おまかせ）",
+       voiceTest:"試聴", voiceNone:"この端末では選べる声が見つかりませんでした。" },
   en:{ drawPrompt:"Draw something with arms and legs.", scan:"Scan my doodle",
        noCam:"No camera? Try a practice doodle:", again:"New doodle",
        hint:"Tap to talk · drag to carry · double-tap to dance",
@@ -380,7 +406,9 @@ const UI = {
        chatStartDetail:"Chat needs a one-time model download (hundreds of MB to ~1GB). On some devices this can make the browser unstable while loading.",
        chatStartBtn:"Download & start chatting",
        crashNoticeText:"Last time, the page seems to have ended while the chat model was loading (possibly a crash). Chat may be unstable on this device.",
-       recordHint:"Worth recording that? (the ●10s button)" },
+       recordHint:"Worth recording that? (the ●10s button)",
+       voiceBtn:"Choose voice", voicePanelTitle:"Choose voice", voiceAuto:"Automatic",
+       voiceTest:"Test", voiceNone:"No selectable voices found on this device." },
 };
 const LINES = {
   // Cute + written to be READ ALOUD naturally by speechSynthesis: short,
@@ -427,6 +455,45 @@ $("#langBtn").onclick = ()=>{ LANG = LANG==="ja"?"en":"ja"; applyLang(); };
 applyLang();
 const pick = arr => arr[(Math.random()*arr.length)|0];
 
+/* ---------------- voice picker (manual override for the free/no-cost fix:
+   let the user pick whichever installed system voice actually sounds ok on
+   their device, instead of leaving it to chance). ---- */
+function getVoiceOverrideURI(){ try{ return localStorage.getItem("sa_voice_uri")||""; }catch(e){ return ""; } }
+function setVoiceOverrideURI(uri){ try{ uri ? localStorage.setItem("sa_voice_uri",uri) : localStorage.removeItem("sa_voice_uri"); }catch(e){} }
+function renderVoiceList(){
+  const list=$("#voiceList");
+  let voices=speechSynthesis.getVoices().filter(v=>v.lang && v.lang.toLowerCase().startsWith(LANG));
+  if(!voices.length) voices=speechSynthesis.getVoices(); // device has none tagged for this lang -- show everything rather than an empty panel
+  const current=getVoiceOverrideURI();
+  list.innerHTML="";
+  const autoRow=document.createElement("div");
+  autoRow.className="voiceRow"+(current?"":" selected");
+  autoRow.innerHTML=`<span>${UI[LANG].voiceAuto}</span>`;
+  const autoBtn=document.createElement("button"); autoBtn.className="ghost"; autoBtn.textContent=UI[LANG].voiceTest;
+  autoBtn.onclick=()=>{ setVoiceOverrideURI(""); renderVoiceList(); say(pick(LINES[LANG].spawn)); };
+  autoRow.appendChild(autoBtn); list.appendChild(autoRow);
+  if(!voices.length){
+    const p=document.createElement("p"); p.style.fontSize="12px"; p.textContent=UI[LANG].voiceNone; list.appendChild(p); return;
+  }
+  voices.forEach(v=>{
+    const row=document.createElement("div");
+    row.className="voiceRow"+(current===v.voiceURI?" selected":"");
+    row.innerHTML=`<span>${v.name} (${v.lang})</span>`;
+    const btn=document.createElement("button"); btn.className="ghost"; btn.textContent=UI[LANG].voiceTest;
+    btn.onclick=()=>{
+      setVoiceOverrideURI(v.voiceURI); renderVoiceList();
+      const u=new SpeechSynthesisUtterance(pick(LINES[LANG].spawn));
+      u.voice=v; u.lang=v.lang; u.pitch=(app.char&&app.char.voice&&app.char.voice.pitch)||1.3;
+      u.rate=(app.char&&app.char.voice&&app.char.voice.rate)||1.05;
+      speechSynthesis.cancel(); speechSynthesis.speak(u);
+    };
+    row.appendChild(btn); list.appendChild(row);
+  });
+}
+$("#voiceBtn").onclick=()=>{ $("#voicePanel").classList.add("show"); renderVoiceList(); };
+$("#voiceCloseBtn").onclick=()=>{ $("#voicePanel").classList.remove("show"); speechSynthesis.cancel(); };
+if(typeof speechSynthesis!=="undefined") speechSynthesis.onvoiceschanged=()=>{ if($("#voicePanel").classList.contains("show")) renderVoiceList(); };
+
 // Crash breadcrumb check (see chatStartBtn's onclick): a leftover
 // "sa_chat_load_started" key means a previous model-load attempt never
 // cleanly finished or failed -- the page went away mid-load, consistent
@@ -454,8 +521,11 @@ function say(text, cb){
     u.lang = LANG==="ja"?"ja-JP":"en-US";
     const voice = (app.char && app.char.voice) || VOICE_PROFILES[3];
     u.rate = voice.rate; u.pitch = voice.pitch;
-    if(voice.synthVoiceURI){
-      const sv = speechSynthesis.getVoices().find(v=>v.voiceURI===voice.synthVoiceURI);
+    // A manual pick (voicePanel) always wins over the automatic per-character
+    // one -- the user chose it specifically because the automatic one sounded bad.
+    const uri = getVoiceOverrideURI() || voice.synthVoiceURI;
+    if(uri){
+      const sv = speechSynthesis.getVoices().find(v=>v.voiceURI===uri);
       if(sv) u.voice = sv;
     }
     u.onend = done; u.onerror = done;
