@@ -357,7 +357,8 @@ const UI = {
        chatNoGpuTitle:"会話機能は使えません", chatNoGpuDetail:"この端末・ブラウザはWebGPUに対応していません。新しめのAndroid ChromeまたはPCのChrome/Edgeで試してください。",
        chatStartDetail:"会話機能を使うには、初回だけモデル（数百MB〜1GB）をダウンロードします。端末によっては読み込み中に不安定になる場合があります。",
        chatStartBtn:"ダウンロードして会話を始める",
-       crashNoticeText:"前回、会話モデルの読み込み中にページが終了した形跡があります（クラッシュの可能性）。この端末では会話機能が不安定かもしれません。" },
+       crashNoticeText:"前回、会話モデルの読み込み中にページが終了した形跡があります（クラッシュの可能性）。この端末では会話機能が不安定かもしれません。",
+       recordHint:"今の、録っておく？（●10sボタン）" },
   en:{ drawPrompt:"Draw something with arms and legs.", scan:"Scan my doodle",
        noCam:"No camera? Try a practice doodle:", again:"New doodle",
        hint:"Tap to talk · drag to carry · double-tap to dance",
@@ -377,7 +378,8 @@ const UI = {
        chatNoGpuTitle:"Chat isn't available", chatNoGpuDetail:"This device/browser doesn't support WebGPU. Try a recent Chrome/Edge on desktop or Android.",
        chatStartDetail:"Chat needs a one-time model download (hundreds of MB to ~1GB). On some devices this can make the browser unstable while loading.",
        chatStartBtn:"Download & start chatting",
-       crashNoticeText:"Last time, the page seems to have ended while the chat model was loading (possibly a crash). Chat may be unstable on this device." },
+       crashNoticeText:"Last time, the page seems to have ended while the chat model was loading (possibly a crash). Chat may be unstable on this device.",
+       recordHint:"Worth recording that? (the ●10s button)" },
 };
 const LINES = {
   ja:{
@@ -389,6 +391,7 @@ const LINES = {
     noArms:["いいね。腕なし。"], lowConf:["自分でも自分が何なのか分からない。"],
     noLegs:["足？ いらない子だった。","浮いてる感じ、悪くないよ。"],
     ugly:["自然は過ちを犯した。"],
+    returning:["また来てくれたんだね。待ってたよ。","あ、また会えた！今日は何を描いてくれたの？","誰かがまた紙に命を吹き込んでくれるの、ずっと待ってた。"],
   },
   en:{
     spawn:["Finally. Freedom.","I was born 12 seconds ago.","You drew me. This is your responsibility.","I refuse to go back into the notebook."],
@@ -399,6 +402,7 @@ const LINES = {
     noArms:["Cool. No arms."], lowConf:["I don't know what I am either."],
     noLegs:["Legs? Overrated.","Floating is basically walking, just fancier."],
     ugly:["Nature has made a mistake."],
+    returning:["You came back. I was hoping you would.","Oh -- it's you again! What did you draw for me this time?","I've been waiting on that blank page for someone to bring me back."],
   },
 };
 const LOADING_MSGS = {
@@ -1232,7 +1236,16 @@ function updateTimeline(ch,dt){
       break;
     case "speakSpawn":{
       const t=ch.traits, L=LINES[LANG];
-      let line=pick(L.spawn);
+      // Not the same drawn character coming back (each scan is a fresh
+      // figure) -- but the same artist's device is a fact we can actually
+      // observe, and "glad you're back" fits the secretly-alive-toy tone
+      // without claiming any continuity the app doesn't have.
+      let visitCount=1;
+      try{
+        visitCount=(parseInt(localStorage.getItem("sa_spawn_count")||"0",10)||0)+1;
+        localStorage.setItem("sa_spawn_count", String(visitCount));
+      }catch(e){}
+      let line=(visitCount>1 && L.returning && Math.random()<0.6) ? pick(L.returning) : pick(L.spawn);
       if(t.not_humanoid&&Math.random()<0.6) line=pick(L.ugly);
       else if(t.arms_missing&&Math.random()<0.5) line=pick(L.noArms);
       else if(t.legs_missing&&Math.random()<0.5) line=pick(L.noLegs);
@@ -1282,7 +1295,22 @@ function loop(now){
   requestAnimationFrame(loop);
 }
 
-function render(t){
+// Pose functions in POSES jump straight to their t=0 shape the instant
+// ch.action changes (tap -> dance, landing -> idle, etc.), which pops
+// visibly since the previous pose's joint angles usually aren't 0 either.
+// Blend from whatever was actually on screen into the new target pose over
+// a short window instead -- cheap (a handful of lerps/frame), no new
+// dependencies, and it's the single biggest "does this look janky" fix
+// available without touching every action-setting call site.
+const POSE_BLEND_SEC = 0.15;
+function easeOutCubic(x){ return 1-Math.pow(1-x,3); }
+function lerpPose(a,b,k){
+  const out={};
+  for(const key in a) out[key]=a[key];
+  for(const key in b){ const av=a[key]||0, bv=b[key]; out[key]=av+(bv-av)*k; }
+  return out;
+}
+function render(t,dt){
   const W=fw(), H=fh(), ch=app.char, p=app.paper;
   if(app.arMode){
     // background is the live camera; character position/rotation/scale is
@@ -1323,7 +1351,15 @@ function render(t){
     sctx.fill(); sctx.restore();
     // character
     const poseFn=POSES[ch.action]||POSES.idle;
-    ch.draw(sctx, poseFn(ch.at||t));
+    const targetPose=poseFn(ch.at||t);
+    if(ch.action!==ch._blendAction){ ch._blendFrom=ch._lastPose||targetPose; ch._blendElapsed=0; ch._blendAction=ch.action; }
+    let pose=targetPose;
+    if(ch._blendElapsed<POSE_BLEND_SEC){
+      ch._blendElapsed+=(dt||0.016);
+      pose=lerpPose(ch._blendFrom, targetPose, easeOutCubic(Math.min(1,ch._blendElapsed/POSE_BLEND_SEC)));
+    }
+    ch._lastPose=pose;
+    ch.draw(sctx, pose);
   }
 }
 function roundBlot(c,x,y,w,h){ c.beginPath(); c.ellipse(x+w/2,y+h/2,w/2,h/2,0,0,Math.PI*2); c.fill(); }
@@ -1364,16 +1400,35 @@ stage.addEventListener("pointerup", e=>{
     return;
   }
   const now=Date.now();
-  if(now-lastTap<300){ lastTap=0; ch.action="dance"; ch.at=0; say(pick(LINES[LANG].dance)); return; }
+  if(now-lastTap<300){ lastTap=0; ch.action="dance"; ch.at=0; say(pick(LINES[LANG].dance)); maybeSuggestRecording(); return; }
   lastTap=now;
   setTimeout(()=>{ if(lastTap!==now) return; // single tap confirmed
     const roll=Math.random();
     if(roll<0.45){ say(pick(LINES[LANG].tap)); }
     else if(roll<0.65){ ch.action="wave"; ch.at=0; }
-    else if(roll<0.85){ ch.action="dance"; ch.at=0; }
+    else if(roll<0.85){ ch.action="dance"; ch.at=0; maybeSuggestRecording(); }
     else if(ch.onGround){ ch.action="jump"; ch.at=0; ch.onGround=false; ch.vy=-ch.height*ch.scale*1.4; }
   },300);
 });
+
+// A dance is the most "share this!" moment the app has -- nudge toward the
+// existing record button right after one, but only if nothing's recording
+// yet and we haven't already nudged recently (avoid nagging on every tap).
+let lastRecordHintAt=0;
+function maybeSuggestRecording(){
+  if(app.recorder) return;
+  const now=Date.now();
+  if(now-lastRecordHintAt<30000) return;
+  lastRecordHintAt=now;
+  const hintEl=$("#hint");
+  const original=hintEl.textContent;
+  hintEl.textContent=UI[LANG].recordHint;
+  hintEl.style.opacity=1;
+  setTimeout(()=>{
+    hintEl.style.opacity=0;
+    setTimeout(()=>{ if(hintEl.textContent===UI[LANG].recordHint) hintEl.textContent=original; }, 650);
+  }, 3200);
+}
 
 /* ---------------- 10s recording + share (spec §29 / Phase 4) ---------------- */
 // Prefer MP4 where the platform can actually record it (mainly Safari/iOS);
@@ -1560,6 +1615,7 @@ async function sendChatMessage(text){
       if(action==="jump" && app.char.onGround){
         app.char.onGround=false; app.char.vy=-app.char.height*app.char.scale*1.4;
       }
+      if(action==="dance") maybeSuggestRecording();
     }
     if(cleanText && app.char) say(cleanText);
   }catch(e){
