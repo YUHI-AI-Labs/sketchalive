@@ -335,8 +335,9 @@ const screens = { home: $("#home"), loading: $("#loading"), corners: $("#corners
 function show(name){ Object.values(screens).forEach(s=>s.classList.remove("active")); screens[name].classList.add("active"); }
 
 /* ---------------- i18n + voice lines ---------------- */
-// Japanese-first by default regardless of browser locale; EN/JA toggle stays available.
-let LANG = (navigator.language||"").startsWith("en") && !(navigator.language||"").startsWith("ja") ? "en" : "ja";
+// Always Japanese by default, full stop -- no browser-locale exception.
+// EN/JA toggle (#langBtn) stays available for anyone who wants English.
+let LANG = "ja";
 const UI = {
   ja:{ drawPrompt:"手と足のあるやつを、紙に描いて。", scan:"落書きをスキャン",
        noCam:"カメラが使えない？ 練習台で試す：", again:"新しい落書き",
@@ -382,27 +383,31 @@ const UI = {
        recordHint:"Worth recording that? (the ●10s button)" },
 };
 const LINES = {
+  // Cute + written to be READ ALOUD naturally by speechSynthesis: short,
+  // casual spoken-style sentences with normal particles (だよ/だね/んだ),
+  // no ellipses or em-dashes (TTS engines tend to stumble or pause oddly
+  // on those), so it sounds like natural speech rather than written text.
   ja:{
-    spawn:["やっと外に出られた！","自由だーーーー！","3分前に生まれました。","描いた責任、取ってね。"],
-    tap:["もう少し上手く描けなかった？","これが俺の顔…？","この体で生きろって？","作者を訴えたい。","待って、消しゴムだけはやめて。"],
-    drop:["ちょっと！","ひどい。"],
-    dance:["いいよ、一曲だけね。"],
-    largeHead:["首が痛い。"], shortLegs:["なんで足が4ピクセルなの？"],
-    noArms:["いいね。腕なし。"], lowConf:["自分でも自分が何なのか分からない。"],
-    noLegs:["足？ いらない子だった。","浮いてる感じ、悪くないよ。"],
-    ugly:["自然は過ちを犯した。"],
-    returning:["また来てくれたんだね。待ってたよ。","あ、また会えた！今日は何を描いてくれたの？","誰かがまた紙に命を吹き込んでくれるの、ずっと待ってた。"],
+    spawn:["やっと会えたね！","わあ、外の世界だ！","きみが呼んでくれたんだね。","生まれたばっかりだけど、もうきみのこと好きだよ。"],
+    tap:["えへへ、くすぐったいよ。","なでてくれるの？","きみに触られるの好きだな。","もう一回、ぎゅってして。"],
+    drop:["わっ！","びっくりしたよ。"],
+    dance:["きみと踊れて嬉しいな！"],
+    largeHead:["頭大きいのも、なんか可愛くない？"], shortLegs:["足は短いけど、頑張って歩くから見ててね。"],
+    noArms:["腕はないけど、気持ちはいっぱいあるよ。"], lowConf:["自分が何なのかよくわかんないけど、きみのそばにいたいのはわかるよ。"],
+    noLegs:["足はないけど、ふわふわ浮いてるのも気に入ってるんだ。"],
+    ugly:["ちょっと変な形かもしれないけど、きみが描いてくれたから大好きだよ。"],
+    returning:["また来てくれたんだね、待ってたよ。","あ、また会えたね！今日は何描いてくれたの？","きみがまた紙に命を吹き込んでくれるの、ずっと待ってたんだ。"],
   },
   en:{
-    spawn:["Finally. Freedom.","I was born 12 seconds ago.","You drew me. This is your responsibility.","I refuse to go back into the notebook."],
-    tap:["You couldn't draw better legs?","This is my face?","I have several questions about my anatomy.","Please keep the eraser away from me."],
-    drop:["HEY!","Rude."],
-    dance:["Fine. One dance."],
-    largeHead:["My neck hurts."], shortLegs:["Why are my legs 4 pixels long?"],
-    noArms:["Cool. No arms."], lowConf:["I don't know what I am either."],
-    noLegs:["Legs? Overrated.","Floating is basically walking, just fancier."],
-    ugly:["Nature has made a mistake."],
-    returning:["You came back. I was hoping you would.","Oh -- it's you again! What did you draw for me this time?","I've been waiting on that blank page for someone to bring me back."],
+    spawn:["There you are! I was hoping it'd be you.","Whoa, the whole wide world!","You made me. I already love you.","Brand new here, but I already like you a lot."],
+    tap:["Hehe, that tickles!","Are you petting me?","I like it when you touch me.","One more squeeze?"],
+    drop:["Whoa!","That startled me!"],
+    dance:["I love dancing with you!"],
+    largeHead:["Big head just means more room to love you back."], shortLegs:["Short legs, but I'll always make it to you."],
+    noArms:["No arms, but plenty of heart."], lowConf:["Not sure what I am exactly, but I know I want to stay close to you."],
+    noLegs:["No legs, but floating next to you is pretty great too."],
+    ugly:["Maybe I look a little strange, but you made me, so I love it."],
+    returning:["You came back! I was hoping you would.","Oh, it's you again! What did you draw for me this time?","I've been waiting on that blank page for you to bring me back."],
   },
 };
 const LOADING_MSGS = {
@@ -443,7 +448,12 @@ function say(text, cb){
     speechSynthesis.cancel();
     const u = new SpeechSynthesisUtterance(text);
     u.lang = LANG==="ja"?"ja-JP":"en-US";
-    u.rate = 1.05; u.pitch = 1.3;
+    const voice = (app.char && app.char.voice) || VOICE_PROFILES[3];
+    u.rate = voice.rate; u.pitch = voice.pitch;
+    if(voice.synthVoiceURI){
+      const sv = speechSynthesis.getVoices().find(v=>v.voiceURI===voice.synthVoiceURI);
+      if(sv) u.voice = sv;
+    }
     u.onend = done; u.onerror = done;
     speechSynthesis.speak(u);
     setTimeout(()=>{ if(speaking) done(); }, 6000); // safety
@@ -503,6 +513,42 @@ function playBlipTalk(text){
   }
 }
 
+/* ---------------- voice: a small set of pitch/rate "personalities",
+ * picked from the drawing's own traits so different creatures actually
+ * sound different, instead of every character using one flat TTS voice.
+ * Assigned once per character (see Character constructor) and reused for
+ * every line it speaks, so it stays consistent across a whole session. ---- */
+const VOICE_PROFILES = [
+  { name:"genki",  pitch:1.5,  rate:1.15 }, // energetic, a little squeaky
+  { name:"gentle", pitch:1.15, rate:0.92 }, // soft, unhurried
+  { name:"sleepy", pitch:0.95, rate:0.85 }, // low, dreamy, floaty
+  { name:"quirky", pitch:1.35, rate:1.05 }, // default cute baseline
+  { name:"shy",    pitch:1.25, rate:0.95 }, // a bit hesitant
+];
+function pickVoiceProfile(traits){
+  const t = traits||{};
+  const candidates=[];
+  if(t.short_legs) candidates.push("genki");
+  if(t.large_head) candidates.push("gentle");
+  if(t.legs_missing) candidates.push("sleepy");
+  if(t.not_humanoid) candidates.push("quirky");
+  if(t.arms_missing) candidates.push("shy");
+  const pool = candidates.length ? candidates : VOICE_PROFILES.map(p=>p.name);
+  const name = pool[(Math.random()*pool.length)|0];
+  // Return a copy, not the shared profile object -- callers attach a
+  // per-character synthVoiceURI onto it and must not mutate the shared list.
+  return { ...(VOICE_PROFILES.find(p=>p.name===name) || VOICE_PROFILES[3]) };
+}
+// Not every browser exposes more than one voice per language (many mobile
+// browsers only have one) -- this is a bonus on top of pitch/rate, which
+// is the part that reliably varies everywhere.
+function pickSynthVoice(langPrefix){
+  try{
+    const voices = speechSynthesis.getVoices().filter(v=>v.lang && v.lang.toLowerCase().startsWith(langPrefix));
+    return voices.length ? voices[(Math.random()*voices.length)|0] : null;
+  }catch(e){ return null; }
+}
+
 /* =====================================================================
    Character: FK skeleton + linear blend skinning on a textured 2D mesh
    ===================================================================== */
@@ -520,6 +566,8 @@ class Character{
     this.joints0 = result.joints;              // rest pose (image coords)
     this.mesh = result.mesh;
     this.traits = result.traits;
+    this.voice = pickVoiceProfile(result.traits);
+    this.voice.synthVoiceURI = (pickSynthVoice(LANG==="ja"?"ja":"en")||{}).voiceURI || null;
     this.buildTexture(srcCanvas);
     this.buildRest();
     // world state

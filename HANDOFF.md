@@ -4,6 +4,25 @@
 ＋PWA化＋WebLLM会話機能＋Streamlit埋め込みまで実装したが、**実機（実際のスマホ・
 実際の紙）では未検証**。以下は正直な現状リスト。
 
+## セリフの書き直し + 声のバリエーション (2026-08-31)
+
+**セリフ**: `LINES.ja`/`LINES.en`が皮肉・毒舌寄りだった（「作者を訴えたい。」「自然は
+過ちを犯した。」等）。ユーザーから「可愛くない」「変なのやめろ」と明確な指摘があり、
+spawn/tap/drop/dance/各特徴（noArms/noLegs/largeHead/shortLegs/lowConf/ugly）/
+returningの全カテゴリを可愛い・温かいトーンに全面的に書き直した。日本語は読み上げ
+(`speechSynthesis`)前提で、「…」「―」のような読み上げで不自然な間が出やすい記号を排除し、
+だよ/だね/んだ等の自然な話し言葉の語尾に統一している。
+
+**声のバリエーション**: これまで`say()`は全キャラクター共通で`pitch:1.3, rate:1.05`
+固定だった。`VOICE_PROFILES`（genki/gentle/sleepy/quirky/shyの5種、それぞれpitch・
+rateが異なる）を追加し、`Character`生成時に`result.traits`（足が短い→genki、頭が
+大きい→gentle、足がない→sleepy、腕がない→shy、認識不能→quirky、該当なしはランダム）
+に応じて1体につき1つ割り当てる(`pickVoiceProfile()`)。その声はキャラクターの生存期間中
+ずっと保持され、`say()`はそのつど`app.char.voice`から読む。端末に複数の日本語/英語音声
+(`speechSynthesis.getVoices()`)がある場合は、それも1体につき1つランダムに割り当てる
+(`pickSynthVoice()`) — ただし多くのモバイルブラウザは言語ごとに1声しか無いため、
+これはボーナス扱いで、主な差別化はpitch/rateの方。
+
 ## 可動のブレンド + 滞在時間対策 (2026-08-31)
 
 **ポーズ間ブレンド**: 各アクション(`POSES`内の`idle`/`wave`/`dance`等)は`ch.action`が
