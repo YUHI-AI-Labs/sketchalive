@@ -397,6 +397,8 @@ const LINES = {
     noLegs:["足はないけど、ふわふわ浮いてるのも気に入ってるんだ。"],
     ugly:["ちょっと変な形かもしれないけど、きみが描いてくれたから大好きだよ。"],
     returning:["また来てくれたんだね、待ってたよ。","あ、また会えたね！今日は何描いてくれたの？","きみがまた紙に命を吹き込んでくれるの、ずっと待ってたんだ。"],
+    caught:["あ、見てた？ 何もしてなかったよ。","え、いつから見てたの？","ちゃんとここにいたから安心して。"],
+    missed:["おかえり！ 寂しかったよ。","戻ってきてくれたんだね、ずっと待ってたんだ。","いなくなっちゃったかと思った。おかえり。"],
   },
   en:{
     spawn:["There you are! I was hoping it'd be you.","Whoa, the whole wide world!","You made me. I already love you.","Brand new here, but I already like you a lot."],
@@ -408,6 +410,8 @@ const LINES = {
     noLegs:["No legs, but floating next to you is pretty great too."],
     ugly:["Maybe I look a little strange, but you made me, so I love it."],
     returning:["You came back! I was hoping you would.","Oh, it's you again! What did you draw for me this time?","I've been waiting on that blank page for you to bring me back."],
+    caught:["Oh, were you watching? I wasn't doing anything.","Wait, how long have you been there?","I was right here the whole time, promise."],
+    missed:["You're back! I missed you.","You came back, I was waiting.","I thought maybe you weren't coming back. Glad you did."],
   },
 };
 const LOADING_MSGS = {
@@ -732,6 +736,10 @@ const POSES = {
   lookRight(){ return { neck:0.28, head:0.18 }; },
   hesitate(t){ return { root:-0.08, neck:0.15, head:0.2, rootDY:Math.sin(t*3)*1,
       knee_left:0.15, knee_right:0.15 }; },
+  // Deliberately near-empty (no breathing sway) -- blended in from whatever
+  // was playing, this reads as "stopped moving/holding still", used when the
+  // user looks back at the tab after looking away. See visibilitychange below.
+  hidden(){ return { neck:0.02, head:0.02 }; },
 };
 
 /* =====================================================================
@@ -1477,6 +1485,27 @@ function maybeSuggestRecording(){
     setTimeout(()=>{ if(hintEl.textContent===UI[LANG].recordHint) hintEl.textContent=original; }, 650);
   }, 3200);
 }
+
+// "Freezes when you're not looking" -- the one generic, pre-existing trope
+// this app leans on for its secretly-alive-toy feel (see HANDOFF.md for why
+// nothing more specific than that is used). document.visibilitychange is a
+// real, honest signal for "the user looked away and back", unlike anything
+// that would need camera/attention tracking.
+let hiddenAt=null;
+document.addEventListener("visibilitychange", ()=>{
+  if(document.visibilityState==="hidden"){ hiddenAt=Date.now(); return; }
+  if(document.visibilityState!=="visible" || hiddenAt==null) return;
+  const awaySec=(Date.now()-hiddenAt)/1000;
+  hiddenAt=null;
+  const ch=app.char;
+  if(app.state!=="live" || !ch || ch.timeline || app.dragging || awaySec<1.5) return;
+  ch.action="hidden"; ch.at=0;
+  setTimeout(()=>{
+    if(app.state!=="live" || app.char!==ch || ch.timeline) return;
+    ch.action="wave"; ch.at=0;
+    say(pick(LINES[LANG][awaySec>20 ? "missed" : "caught"]));
+  }, 380);
+});
 
 /* ---------------- 10s recording + share (spec §29 / Phase 4) ---------------- */
 // Prefer MP4 where the platform can actually record it (mainly Safari/iOS);
