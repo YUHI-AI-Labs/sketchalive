@@ -1674,8 +1674,11 @@ const CHAT_ACTIONS = ["idle","wave","dance","jump","panic"];
 function personaSystemPrompt(){
   const t = (app.char && app.char.traits) || {};
   const langLine = LANG==="ja"
-    ? "重要: 必ず日本語だけで答えてください。中国語や英語は絶対に混ぜないでください。1〜2文の短いカジュアルな返事にしてください。"
-    : "IMPORTANT: Reply only in English. Never use Chinese or Japanese. Keep it to 1-2 short casual sentences.";
+    ? "重要: 必ず日本語だけで答えてください。中国語や英語は絶対に混ぜないでください。返事は1文だけ、できるだけ短く、カジュアルにしてください。"
+    : "IMPORTANT: Reply only in English. Never use Chinese or Japanese. Keep it to exactly 1 short, casual sentence.";
+  const curiosityLine = LANG==="ja"
+    ? "きみが何かを見せてくれたり教えてくれたりしたら、それに興味を持って、素直に反応してください（例:「これは何?」と聞かれたものについて教わったら、覚えて嬉しそうに話す）。"
+    : "If your person shows or tells you about something, react to it with genuine curiosity and warmth (e.g. if they teach you what something is, sound glad to have learned it).";
   const flavor = [];
   if(t.not_humanoid) flavor.push(LANG==="ja"?"自分が何の生き物なのかよく分かっていない。":"You're not entirely sure what kind of creature you even are.");
   if(t.arms_missing) flavor.push(LANG==="ja"?"腕がないことを時々ネタにする。":"You occasionally joke about not having arms.");
@@ -1691,6 +1694,7 @@ function personaSystemPrompt(){
     "You still tease your own drawing quirks affectionately, but the overall feeling is wonder and belonging, not sarcasm.",
     "Never say you are an AI, a language model, or a chatbot, and never claim to be a character from any existing movie, show, or franchise. Stay in character no matter what.",
     flavor.join(" "),
+    curiosityLine,
     langLine,
     actionLine,
   ].filter(Boolean).join(" ");
@@ -1741,7 +1745,7 @@ async function sendChatMessage(text){
     if(chat.history.length>8) chat.history = chat.history.slice(-8); // keep context (and latency) small
     const messages = [{role:"system", content:personaSystemPrompt()}, ...chat.history];
     const stream = await chat.engine.chat.completions.create({
-      messages, stream:true, max_tokens:80, temperature:0.9,
+      messages, stream:true, max_tokens:45, temperature:0.9,
     });
     let full="";
     const lineEl = appendChatLine("char", "");
